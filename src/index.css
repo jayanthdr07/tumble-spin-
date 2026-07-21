@@ -1,0 +1,229 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Trendy Pop Colors */
+  --color-brand-deep: #111827;       /* Dark charcoal/near-black for high-contrast text & structures */
+  --color-brand-teal: #9D4EDD;       /* Electric Lilac - Primary brand accent for high highlights */
+  --color-brand-primary: #9D4EDD;    /* Electric Lilac - Major CTAs & active states */
+  --color-brand-secondary: #7B2CBF;  /* Deeper Lilac for secondary focus & gradient endpoints */
+  --color-brand-accent: #5EEAD4;     /* Aqua Mint - Freshness, support cards, badges, icons */
+  --color-brand-glow: rgba(157, 78, 221, 0.12);
+  --color-brand-light: #FAFAFD;      /* Super clean, airy white base background */
+  --color-brand-dark: #0B0914;       /* Chic pop dark mode base (approachable deep indigo/charcoal) */
+  --color-brand-yellow: #FFF3B0;     /* Soft Yellow - warm friendly highlights, chips & banners */
+  
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-bubble: bubble 10s ease-in infinite;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+  h1, h2, h3, .serif-heading {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom premium styles */
+.glass-header {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(157, 78, 221, 0.1);
+}
+
+.dark .glass-header {
+  background: rgba(11, 9, 20, 0.85);
+  border-bottom: 1px solid rgba(94, 234, 212, 0.1);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(157, 78, 221, 0.08);
+  box-shadow: 0 10px 25px -10px rgba(157, 78, 221, 0.08);
+}
+
+.dark .glass-card {
+  background: rgba(11, 9, 20, 0.7);
+  border: 1px solid rgba(94, 234, 212, 0.08);
+  box-shadow: 0 10px 35px -10px rgba(0, 0, 0, 0.3);
+}
+
+.glass-card-hover {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(157, 78, 221, 0.25);
+  box-shadow: 0 15px 35px 0 rgba(157, 78, 221, 0.12);
+}
+
+.dark .glass-card-hover:hover {
+  border-color: rgba(94, 234, 212, 0.25);
+  box-shadow: 0 15px 35px 0 rgba(94, 234, 212, 0.08);
+}
+
+.aqua-glow {
+  box-shadow: 0 0 40px rgba(94, 234, 212, 0.15);
+}
+
+.dark .aqua-glow {
+  box-shadow: 0 0 50px rgba(94, 234, 212, 0.1);
+}
+
+/* Keyframe animations */
+@keyframes float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(2deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+@keyframes bubble {
+  0% { transform: translateY(100px) scale(0.8); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.3; }
+  100% { transform: translateY(-400px) scale(1.2); opacity: 0; }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(18, 114, 130, 0.02);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(18, 114, 130, 0.15);
+  border-radius: 99px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(18, 114, 130, 0.3);
+}
+
+/* Fluid Typography Helpers */
+.title-clamp {
+  font-size: clamp(1.75rem, 3.2vw + 0.6rem, 3rem);
+  line-height: 1.12;
+}
+
+.subtitle-clamp {
+  font-size: clamp(1.125rem, 1.5vw + 0.5rem, 1.5rem);
+}
+
+.section-title-clamp {
+  font-size: clamp(1.75rem, 3.5vw + 0.5rem, 3.25rem);
+  line-height: 1.2;
+}
+
+/* Increased Font Size Everywhere (Booking Modal, Admin Panel, Header, and All Home Page Sections) */
+#booking-modal-container, #admin-panel-container, .custom-modal, #services, #pricing, #how-it-works, #why-us, #service-quality, #estimator, #before-after, #app-convenience, #service-areas-section, #main-header {
+  font-size: 1.05rem;
+}
+
+#booking-modal-container .text-\[8px\], #admin-panel-container .text-\[8px\], #services .text-\[8px\], #pricing .text-\[8px\], #how-it-works .text-\[8px\], #why-us .text-\[8px\], #service-quality .text-\[8px\], #estimator .text-\[8px\], #before-after .text-\[8px\], #app-convenience .text-\[8px\], #service-areas-section .text-\[8px\], #main-header .text-\[8px\] {
+  font-size: 0.725rem;
+}
+#booking-modal-container .text-\[9px\], #admin-panel-container .text-\[9px\], #services .text-\[9px\], #pricing .text-\[9px\], #how-it-works .text-\[9px\], #why-us .text-\[9px\], #service-quality .text-\[9px\], #estimator .text-\[9px\], #before-after .text-\[9px\], #app-convenience .text-\[9px\], #service-areas-section .text-\[9px\], #main-header .text-\[9px\] {
+  font-size: 0.8rem;
+}
+#booking-modal-container .text-\[10px\], #admin-panel-container .text-\[10px\], #services .text-\[10px\], #pricing .text-\[10px\], #how-it-works .text-\[10px\], #why-us .text-\[10px\], #service-quality .text-\[10px\], #estimator .text-\[10px\], #before-after .text-\[10px\], #app-convenience .text-\[10px\], #service-areas-section .text-\[10px\], #main-header .text-\[10px\] {
+  font-size: 0.875rem;
+}
+#booking-modal-container .text-\[11px\], #admin-panel-container .text-\[11px\], #services .text-\[11px\], #pricing .text-\[11px\], #how-it-works .text-\[11px\], #why-us .text-\[11px\], #service-quality .text-\[11px\], #estimator .text-\[11px\], #before-after .text-\[11px\], #app-convenience .text-\[11px\], #service-areas-section .text-\[11px\], #main-header .text-\[11px\] {
+  font-size: 0.95rem;
+}
+#booking-modal-container .text-xs, #admin-panel-container .text-xs, #services .text-xs, #pricing .text-xs, #how-it-works .text-xs, #why-us .text-xs, #service-quality .text-xs, #estimator .text-xs, #before-after .text-xs, #app-convenience .text-xs, #service-areas-section .text-xs, #main-header .text-xs {
+  font-size: 1.0rem;
+}
+#booking-modal-container .text-sm, #admin-panel-container .text-sm, #services .text-sm, #pricing .text-sm, #how-it-works .text-sm, #why-us .text-sm, #service-quality .text-sm, #estimator .text-sm, #before-after .text-sm, #app-convenience .text-sm, #service-areas-section .text-sm, #main-header .text-sm {
+  font-size: 1.125rem;
+}
+#booking-modal-container .text-base, #admin-panel-container .text-base, #services .text-base, #pricing .text-base, #how-it-works .text-base, #why-us .text-base, #service-quality .text-base, #estimator .text-base, #before-after .text-base, #app-convenience .text-base, #service-areas-section .text-base, #main-header .text-base {
+  font-size: 1.25rem;
+}
+#booking-modal-container .text-lg, #admin-panel-container .text-lg, #services .text-lg, #pricing .text-lg, #how-it-works .text-lg, #why-us .text-lg, #service-quality .text-lg, #estimator .text-lg, #before-after .text-lg, #app-convenience .text-lg, #service-areas-section .text-lg, #main-header .text-lg {
+  font-size: 1.45rem;
+}
+#booking-modal-container .text-xl, #admin-panel-container .text-xl, #services .text-xl, #pricing .text-xl, #how-it-works .text-xl, #why-us .text-xl, #service-quality .text-xl, #estimator .text-xl, #before-after .text-xl, #app-convenience .text-xl, #service-areas-section .text-xl, #main-header .text-xl {
+  font-size: 1.75rem;
+}
+#booking-modal-container .text-2xl, #admin-panel-container .text-2xl, #services .text-2xl, #pricing .text-2xl, #how-it-works .text-2xl, #why-us .text-2xl, #service-quality .text-2xl, #estimator .text-2xl, #before-after .text-2xl, #app-convenience .text-2xl, #service-areas-section .text-2xl, #main-header .text-2xl {
+  font-size: 2.15rem;
+}
+#booking-modal-container h1, #booking-modal-container h2, #booking-modal-container h3,
+#admin-panel-container h1, #admin-panel-container h2, #admin-panel-container h3,
+#services h1, #services h2, #services h3,
+#pricing h1, #pricing h2, #pricing h3,
+#how-it-works h1, #how-it-works h2, #how-it-works h3,
+#why-us h1, #why-us h2, #why-us h3,
+#service-quality h1, #service-quality h2, #service-quality h3,
+#estimator h1, #estimator h2, #estimator h3,
+#before-after h1, #before-after h2, #before-after h3,
+#app-convenience h1, #app-convenience h2, #app-convenience h3,
+#service-areas-section h1, #service-areas-section h2, #service-areas-section h3,
+#main-header h1, #main-header h2, #main-header h3 {
+  font-size: 1.15em;
+}
+
+#desktop-nav a {
+  font-size: 0.95rem !important;
+}
+@media (min-width: 1024px) {
+  #desktop-nav a {
+    font-size: 1.0rem !important;
+  }
+}
+@media (min-width: 1280px) {
+  #desktop-nav a {
+    font-size: 1.05rem !important;
+  }
+}
+
+/* Increased Font Size in Footer (even larger than other pages) */
+#main-footer {
+  font-size: 1.15rem;
+}
+#main-footer .text-\[8px\] {
+  font-size: 0.8rem;
+}
+#main-footer .text-\[9px\] {
+  font-size: 0.875rem;
+}
+#main-footer .text-\[10px\] {
+  font-size: 0.95rem;
+}
+#main-footer .text-\[11px\] {
+  font-size: 1.025rem;
+}
+#main-footer .text-xs {
+  font-size: 1.075rem;
+}
+#main-footer .text-sm {
+  font-size: 1.15rem;
+}
+#main-footer .text-base {
+  font-size: 1.25rem;
+}
+#main-footer .text-lg {
+  font-size: 1.45rem;
+}
+#main-footer .text-xl {
+  font-size: 1.85rem;
+}
+#main-footer .text-2xl {
+  font-size: 2.15rem;
+}
+#main-footer h4, #main-footer .font-mono {
+  font-size: 1.1em !important;
+}
+

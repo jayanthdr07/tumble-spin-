@@ -1,0 +1,6 @@
+{
+  "name": "Tumble Spin Laundry",
+  "description": "Premium laundry, dry cleaning, and valet doorstep delivery service in Bangalore, Karnataka, India, powered by Tumble Spin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

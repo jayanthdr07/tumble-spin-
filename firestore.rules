@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for validating common types
+    function isStringOfSize(val, min, max) {
+      return val is string && val.size() >= min && val.size() <= max;
+    }
+
+    function isNumberInRange(val, min, max) {
+      return val is number && val >= min && val <= max;
+    }
+
+    // --- ORDERS COLLECTION rules ---
+    match /orders/{orderId} {
+      allow read: if true;
+      allow create, update: if isValidOrder(request.resource.data);
+      allow delete: if true;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['orderId', 'fullName', 'email', 'phone', 'address', 'pickupDate', 'pickupTimeSlot', 'deliveryDate', 'deliveryTimeSlot', 'garmentCareOption', 'selectedServices', 'totalPrice', 'status'])
+        && isStringOfSize(data.orderId, 1, 100)
+        && isStringOfSize(data.fullName, 1, 200)
+        && isStringOfSize(data.email, 3, 200)
+        && isStringOfSize(data.phone, 5, 50)
+        && isStringOfSize(data.address, 1, 1000)
+        && data.selectedServices is list
+        && data.totalPrice is number
+        && isStringOfSize(data.status, 1, 100);
+    }
+
+    // --- REVIEWS COLLECTION rules ---
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create, update: if isValidReview(request.resource.data);
+      allow delete: if true;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'rating', 'content', 'avatar', 'location'])
+        && isStringOfSize(data.id, 1, 100)
+        && isStringOfSize(data.name, 1, 200)
+        && isNumberInRange(data.rating, 1, 5)
+        && isStringOfSize(data.content, 1, 5000);
+    }
+
+    // --- SETTINGS COLLECTION rules ---
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['data']);
+      allow delete: if true;
+    }
+
+    // --- MEMBERSHIPS COLLECTION rules ---
+    match /memberships/{phone} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['phone', 'fullName', 'email', 'packageType', 'rechargeAmount', 'balance', 'createdAt', 'status']);
+      allow delete: if true;
+    }
+
+    // --- COUNTERS COLLECTION rules ---
+    match /counters/{counterId} {
+      allow read, write: if true;
+    }
+
+    // --- WEBHOOK EVENTS COLLECTION rules ---
+    match /webhook_events/{eventId} {
+      allow read, write: if true;
+    }
+  }
+}

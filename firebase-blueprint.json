@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "A laundry or dry cleaning order",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "description": "Unique identifier of the order" },
+        "fullName": { "type": "string", "description": "Full name of the customer" },
+        "email": { "type": "string", "format": "email", "description": "Email address of the customer" },
+        "phone": { "type": "string", "description": "Phone number of the customer" },
+        "address": { "type": "string", "description": "Delivery/pickup address" },
+        "pickupDate": { "type": "string", "description": "Date of pickup" },
+        "pickupTimeSlot": { "type": "string", "description": "Selected pickup timeslot" },
+        "deliveryDate": { "type": "string", "description": "Date of delivery" },
+        "deliveryTimeSlot": { "type": "string", "description": "Selected delivery timeslot" },
+        "garmentCareOption": { "type": "string", "enum": ["standard", "hypoallergenic", "organic-scentless"] },
+        "specialInstructions": { "type": "string" },
+        "selectedServices": { "type": "array" },
+        "subServices": { "type": "array" },
+        "totalPrice": { "type": "number" },
+        "status": { "type": "string" },
+        "timeline": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["orderId", "fullName", "email", "phone", "address", "pickupDate", "pickupTimeSlot", "deliveryDate", "deliveryTimeSlot", "garmentCareOption", "selectedServices", "totalPrice", "status"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer testimonial",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "rating": { "type": "number" },
+        "content": { "type": "string" },
+        "avatar": { "type": "string" },
+        "location": { "type": "string" }
+      },
+      "required": ["id", "name", "role", "rating", "content", "avatar", "location"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "General system configuration document",
+      "type": "object",
+      "properties": {
+        "data": { "type": "object", "description": "Generic settings payload wrapper" }
+      },
+      "required": ["data"]
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection of customer orders"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Collection of testimonials"
+    },
+    "/settings/{settingId}": {
+      "schema": "Setting",
+      "description": "Collection of system configuration documents"
+    }
+  }
+}
