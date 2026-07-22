@@ -250,11 +250,25 @@ export default function OrderTracking() {
       }
 
       // 2. Query Firestore directly for the specific order (secure, no database dump)
+      const saveMatchedOrderToStorage = (matchedOrder: OrderData) => {
+        try {
+          const localStr = localStorage.getItem('tumblespin_orders') || '[]';
+          let localArr = JSON.parse(localStr);
+          if (!Array.isArray(localArr)) localArr = [];
+          localArr = localArr.filter((o: any) => o && o.orderId !== matchedOrder.orderId);
+          localArr.unshift(matchedOrder);
+          localStorage.setItem('tumblespin_orders', JSON.stringify(localArr));
+          window.dispatchEvent(new Event('storage'));
+        } catch (e) {}
+      };
+
       // Query by order doc id
       const orderDocRef = doc(db, 'orders', queryStr);
       const orderDocSnap = await getDoc(orderDocRef);
       if (orderDocSnap.exists()) {
-        setSearchedOrder(orderDocSnap.data() as OrderData);
+        const foundData = orderDocSnap.data() as OrderData;
+        saveMatchedOrderToStorage(foundData);
+        setSearchedOrder(foundData);
         setIsSearching(false);
         return;
       }
@@ -266,7 +280,9 @@ export default function OrderTracking() {
         if (!qSnap.empty) {
           const matchedOrders = qSnap.docs.map(d => d.data() as OrderData);
           matchedOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setSearchedOrder(matchedOrders[0]);
+          const foundData = matchedOrders[0];
+          saveMatchedOrderToStorage(foundData);
+          setSearchedOrder(foundData);
           setIsSearching(false);
           return;
         }
@@ -281,6 +297,7 @@ export default function OrderTracking() {
       );
 
       if (dbMatch) {
+        saveMatchedOrderToStorage(dbMatch);
         setSearchedOrder(dbMatch);
         setIsSearching(false);
         return;
@@ -528,8 +545,8 @@ export default function OrderTracking() {
                     </h4>
 
                     <div className="relative border-l-2 border-slate-100 dark:border-brand-teal/10 ml-3 pl-6 space-y-6">
-                      {searchedOrder.timeline && searchedOrder.timeline.map((step) => (
-                        <div key={`${step.step}-${step.title}`} className="relative">
+                      {searchedOrder.timeline && searchedOrder.timeline.map((step, idx) => (
+                        <div key={`${step.step || idx}-${step.title || 'step'}-${idx}`} className="relative">
                           {/* Dot indicator */}
                           <span className={`absolute -left-[31px] top-1.5 flex h-4 w-4 items-center justify-center rounded-full border-2 ${
                             step.done 

@@ -748,6 +748,9 @@ export default function AdminPanel({
         setAdminRole(null);
         setIsAuthorized(false);
       }
+
+      // Reload orders whenever local storage is modified
+      loadOrders();
     };
 
     window.addEventListener('storage', handleStorageChange);

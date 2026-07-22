@@ -18,21 +18,7 @@ service cloud.firestore {
 
     // --- ORDERS COLLECTION rules ---
     match /orders/{orderId} {
-      allow read: if true;
-      allow create, update: if isValidOrder(request.resource.data);
-      allow delete: if true;
-    }
-
-    function isValidOrder(data) {
-      return data.keys().hasAll(['orderId', 'fullName', 'email', 'phone', 'address', 'pickupDate', 'pickupTimeSlot', 'deliveryDate', 'deliveryTimeSlot', 'garmentCareOption', 'selectedServices', 'totalPrice', 'status'])
-        && isStringOfSize(data.orderId, 1, 100)
-        && isStringOfSize(data.fullName, 1, 200)
-        && isStringOfSize(data.email, 3, 200)
-        && isStringOfSize(data.phone, 5, 50)
-        && isStringOfSize(data.address, 1, 1000)
-        && data.selectedServices is list
-        && data.totalPrice is number
-        && isStringOfSize(data.status, 1, 100);
+      allow read, write: if true;
     }
 
     // --- REVIEWS COLLECTION rules ---

@@ -1188,6 +1188,76 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
       setUserPaidAmount(grandTotal.toString());
       setUpiRefNo(Math.floor(100000000000 + Math.random() * 900000000000).toString());
 
+      // Guarantee order document is saved locally and in Firestore immediately
+      const orderTimeline = [
+        { step: 1, title: 'Order Confirmed', desc: 'Booking received and digital invoice dispatched.', time: new Date().toLocaleString(), done: true, active: true },
+        { step: 2, title: 'Valet Pickup Completed', desc: 'Arjun Gowda is arriving for doorstep garment verification.', time: 'Scheduled', done: false, active: false },
+        { step: 3, title: 'In-Facility Fabric Screening', desc: 'Processing at our master textile cleaning plant.', time: 'Pending', done: false, active: false },
+        { step: 4, title: 'Quality Pressed & Inspected', desc: 'Inspected under pristine studio lighting.', time: 'Pending', done: false, active: false },
+        { step: 5, title: 'Returned Flawless', desc: 'Handpacked in breathable protective garment covers.', time: 'Pending', done: false, active: false },
+      ];
+
+      const clientOrderDoc = data.orderDoc || {
+        orderId: data.orderId,
+        adminViewed: false,
+        fullName: bookingDetails.fullName || 'Valued Client',
+        email: bookingDetails.email || 'client@tumblespin.com',
+        phone: bookingDetails.phone || '',
+        address: bookingDetails.address || '',
+        pickupDate: bookingDetails.pickupDate || '',
+        pickupTimeSlot: bookingDetails.pickupTimeSlot || '',
+        deliveryDate: bookingDetails.deliveryDate || '',
+        deliveryTimeSlot: bookingDetails.deliveryTimeSlot || '',
+        garmentCareOption: bookingDetails.garmentCareOption || 'standard',
+        specialInstructions: bookingDetails.specialInstructions || '',
+        selectedServices,
+        subServices: getSelectedItemsWithDetails().map(item => ({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          price: adjustPrice(item.price),
+          quantity: item.quantity,
+          serviceType: item.serviceType
+        })),
+        totalPrice: grandTotal,
+        status: 'Payment Pending',
+        orderStatus: 'Pending',
+        smsOptIn: smsOptIn,
+        timeline: orderTimeline,
+        paymentMethod: 'UPI / Dynamic QR',
+        paymentDetails: {
+          type: 'UPI_QR',
+          label: 'UPI Dynamic QR (Pending)',
+          details: 'Awaiting gateway settlement...'
+        },
+        paymentStatus: 'pending',
+        paymentGateway: 'razorpay',
+        razorpayQrId: data.qrCodeId || `qr_sim_${Math.random().toString(36).substr(2, 9)}`,
+        createdAt: new Date().toISOString()
+      };
+
+      const localOrdersStr = localStorage.getItem('tumblespin_orders') || '[]';
+      let localOrders = [];
+      try {
+        localOrders = JSON.parse(localOrdersStr);
+        if (!Array.isArray(localOrders)) localOrders = [];
+      } catch (e) {
+        localOrders = [];
+      }
+      localOrders = localOrders.filter((o: any) => o && o.orderId !== data.orderId);
+      localOrders.unshift(clientOrderDoc);
+      localStorage.setItem('tumblespin_orders', JSON.stringify(localOrders));
+
+      try {
+        await setDoc(doc(db, 'orders', data.orderId), clientOrderDoc);
+        console.log(`[BookingModal] Order ${data.orderId} saved to Firestore successfully.`);
+      } catch (fsErr) {
+        console.warn('Client-side Firestore setDoc error (non-fatal):', fsErr);
+      }
+
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('tumblespin_new_order_alert', { detail: clientOrderDoc }));
+
       setShowQrPayment(true);
     } catch (err: any) {
       console.warn('Backend payment route unavailable or synchronizing. Falling back to secure, real-time client-side Firestore checkout:', err);
@@ -1347,9 +1417,10 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
         if (!Array.isArray(localOrders)) localOrders = [];
       } catch (e) {}
 
+      let updatedSimulatedOrder: any = null;
       localOrders = localOrders.map((o: any) => {
         if (o.orderId === generatedOrderId) {
-          return {
+          updatedSimulatedOrder = {
             ...o,
             status: 'Confirmed',
             paymentStatus: 'paid',
@@ -1360,10 +1431,21 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
               details: `Settled with UPI Ref: ${upiRefNo}`
             }
           };
+          return updatedSimulatedOrder;
         }
         return o;
       });
       localStorage.setItem('tumblespin_orders', JSON.stringify(localOrders));
+
+      if (updatedSimulatedOrder) {
+        try {
+          await setDoc(doc(db, 'orders', generatedOrderId), updatedSimulatedOrder);
+          console.log(`[BookingModal] Order ${generatedOrderId} payment updated to Paid in Firestore.`);
+        } catch (fsErr) {
+          console.warn('Client-side Firestore setDoc error on payment simulation (non-fatal):', fsErr);
+        }
+      }
+
       window.dispatchEvent(new Event('storage'));
 
       setQrVerificationMsg('Payment verified & authorized! Provisioning your premium laundry slot...');
@@ -2708,7 +2790,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                               return (
                                 <button
                                   type="button"
-                                  key={isoDate}
+                                  key={`pickup-${isoDate}-${idx}`}
                                   onClick={() => setBookingDetails(prev => ({ ...prev, pickupDate: isoDate }))}
                                   className={`rounded-2xl border p-2 text-center transition-all cursor-pointer flex flex-col justify-between items-center ${
                                     isSelected
@@ -2786,7 +2868,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                               return (
                                 <button
                                   type="button"
-                                  key={isoDate}
+                                  key={`delivery-${isoDate}-${idx}`}
                                   onClick={() => setBookingDetails(prev => ({ ...prev, deliveryDate: isoDate }))}
                                   className={`rounded-2xl border p-2 text-center transition-all cursor-pointer flex flex-col justify-between items-center ${
                                     isSelected
@@ -2976,11 +3058,11 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
                       {/* Garment selection list */}
                       <div className="grid gap-3 sm:grid-cols-2 max-h-[30vh] overflow-y-auto pr-1">
-                        {effectiveSubServices.filter(item => item.category === activeSubCategory).map(item => {
+                        {effectiveSubServices.filter(item => item.category === activeSubCategory).map((item, idx) => {
                           const qty = quantities[item.id] || 0;
                           return (
                             <div 
-                              key={item.id}
+                              key={`${item.id}-${idx}`}
                               className={`p-3 rounded-2xl border flex justify-between items-center transition-all ${
                                 qty > 0 
                                   ? 'border-brand-primary bg-brand-primary/[0.02] dark:border-brand-accent/50 dark:bg-brand-accent/[0.02]' 
@@ -3282,8 +3364,8 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             <div className="border-b border-slate-100 dark:border-slate-800 pb-2.5">
                               <span className="font-semibold text-slate-800 dark:text-white block mb-1.5">Itemized Garments & Estimates:</span>
                               <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                                {getSelectedItemsWithDetails().map((sub) => (
-                                  <div key={sub.id} className="flex justify-between items-center text-[11px] text-slate-600 dark:text-slate-300 py-0.5">
+                                {getSelectedItemsWithDetails().map((sub, sidx) => (
+                                  <div key={`${sub.id || sub.name}-${sidx}`} className="flex justify-between items-center text-[11px] text-slate-600 dark:text-slate-300 py-0.5">
                                     <span className="flex items-center gap-1.5 min-w-0">
                                       <span className="text-brand-primary dark:text-brand-accent flex-shrink-0">
                                         {getItemIcon(sub.id || sub.name, "h-3.5 w-3.5")}

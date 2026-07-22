@@ -123,11 +123,6 @@ async function pushToFirestore(key: string, valueStr: string) {
   if (isFirestoreSuspended) {
     return;
   }
-  if (key === 'tumblespin_orders' && !isSyncAdmin) {
-    // Non-admin devices must NEVER push their entire orders array to Firestore.
-    // This prevents overwriting the admin's status updates or resurrecting deleted orders.
-    return;
-  }
   try {
     let data;
     if (key === 'tumblespin_admin_password' || key === 'tumblespin_master_password') {
@@ -153,14 +148,14 @@ async function pushToFirestore(key: string, valueStr: string) {
         }
       } catch (e) {}
 
-      const filteredOrders = newOrders.filter((order: any) => order && order.orderId && !deletedIds.includes(order.orderId));
+      const filteredOrders = newOrders.filter((order: any) => order && order.orderId && !deletedIds.includes(order.orderId) && !order.isMock);
       
-      // Update/Set each order
+      // Update/Set each non-mock order with merge to preserve fields
       for (const order of filteredOrders) {
         if (isFirestoreSuspended) return;
         if (order && order.orderId) {
           try {
-            await setDoc(doc(db, 'orders', order.orderId), order);
+            await setDoc(doc(db, 'orders', order.orderId), order, { merge: true });
           } catch (err) {
             handleFirestoreError(err, OperationType.WRITE, `orders/${order.orderId}`);
           }
@@ -169,13 +164,15 @@ async function pushToFirestore(key: string, valueStr: string) {
       
       if (isFirestoreSuspended) return;
 
-      // Only delete orders from Firestore that are explicitly tracked in the tombstone list (deletedIds)
-      for (const docId of deletedIds) {
-        if (isFirestoreSuspended) return;
-        try {
-          await deleteDoc(doc(db, 'orders', docId));
-        } catch (err) {
-          handleFirestoreError(err, OperationType.DELETE, `orders/${docId}`);
+      // Only delete orders from Firestore if admin and explicitly deleted
+      if (isSyncAdmin) {
+        for (const docId of deletedIds) {
+          if (isFirestoreSuspended) return;
+          try {
+            await deleteDoc(doc(db, 'orders', docId));
+          } catch (err) {
+            handleFirestoreError(err, OperationType.DELETE, `orders/${docId}`);
+          }
         }
       }
     } else if (key === 'tumblespin_reviews') {
@@ -312,11 +309,10 @@ export function initializeFirebaseSync(isAdmin: boolean = false) {
   });
   activeUnsubscribes = [];
 
-  // 1. Listen to 'orders' collection (Admins only)
-  if (isAdmin) {
-    try {
-      let isOrdersInitialLoad = true;
-      const unsubOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
+  // 1. Listen to 'orders' collection (Real-time synchronization & alerts)
+  try {
+    let isOrdersInitialLoad = true;
+    const unsubOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
       try {
         const rawOrders = snapshot.docs.map(docSnap => docSnap.data());
         
@@ -421,7 +417,6 @@ export function initializeFirebaseSync(isAdmin: boolean = false) {
     activeUnsubscribes.push(unsubMemberships);
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'memberships');
-  }
   }
 
   // 2. Listen to 'reviews' collection

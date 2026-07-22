@@ -90,7 +90,7 @@ const SUB_SERVICES_MAP: Record<string, number> = {
 };
 
 // Re-computes the order price on the backend to avoid trusting the client total
-function withTimeout<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Operation timed out after ${timeoutMs}ms`));
@@ -772,7 +772,8 @@ const razorpay = new Razorpay({
 
         // Save order document to Firestore
         try {
-          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 1200);
+          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 10000);
+          console.log(`[Backend create-qr-order] Order ${orderId} saved to Firestore successfully.`);
         } catch (dbErr) {
           console.warn('Backend database write skipped or failed (high-availability mode active):', dbErr);
         }
@@ -788,7 +789,8 @@ const razorpay = new Razorpay({
           qrCodeId: mockQrId,
           qrCodeUrl: mockQrUrl,
           vpa: 'prakashcsat@oksbi',
-          simulated: true
+          simulated: true,
+          orderDoc: newOrderDoc
         });
       }
 
@@ -823,7 +825,8 @@ const razorpay = new Razorpay({
         
         // Save order document with real Razorpay metadata to Firestore
         try {
-          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 1200);
+          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 10000);
+          console.log(`[Backend create-qr-order] Order ${orderId} saved to Firestore successfully.`);
         } catch (dbErr) {
           console.warn('Backend database write skipped or failed (high-availability mode active):', dbErr);
         }
@@ -835,7 +838,8 @@ const razorpay = new Razorpay({
           qrCodeUrl: qrCode.image_url,
           vpa: qrCode.vpa || 'prakashcsat@oksbi',
           simulated: false,
-          expiresAt: closeBy * 1000
+          expiresAt: closeBy * 1000,
+          orderDoc: newOrderDoc
         });
       } catch (gateErr: any) {
         console.error('Razorpay Gateway QR generation failed. Full detailed error details:', gateErr?.message, JSON.stringify(gateErr, null, 2));
@@ -844,7 +848,8 @@ const razorpay = new Razorpay({
         const mockQrId = `qr_fallback_${crypto.randomBytes(8).toString('hex')}`;
         newOrderDoc.razorpayQrId = mockQrId;
         try {
-          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 1200);
+          await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 10000);
+          console.log(`[Backend create-qr-order] Order ${orderId} saved to Firestore successfully.`);
         } catch (dbErr) {
           console.warn('Backend database write skipped or failed (high-availability mode active):', dbErr);
         }
@@ -861,7 +866,8 @@ const razorpay = new Razorpay({
           vpa: 'prakashcsat@oksbi',
           simulated: true,
           fallback: true,
-          expiresAt: (Math.floor(Date.now() / 1000) + 300) * 1000
+          expiresAt: (Math.floor(Date.now() / 1000) + 300) * 1000,
+          orderDoc: newOrderDoc
         });
       }
     } catch (error: any) {
