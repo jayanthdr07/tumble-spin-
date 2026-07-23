@@ -87,7 +87,7 @@ export default function WhyChooseUs() {
           <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
             {highlights.map((item, idx) => (
               <motion.div
-                key={item.id}
+                key={`why-${item.id}-${idx}`}
                 initial={{ opacity: 0, y: 15 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-40px" }}

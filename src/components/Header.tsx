@@ -176,9 +176,9 @@ export default function Header({
           <div className="flex items-center justify-end gap-4 lg:gap-6 xl:gap-8 flex-1">
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-3 lg:gap-4 xl:gap-6" id="desktop-nav">
-              {navLinks.map((link) => (
+              {navLinks.map((link, idx) => (
                 <a
-                  key={link.name}
+                  key={`desk-nav-${link.name}-${idx}`}
                   href={link.href}
                   className="relative text-xs font-semibold tracking-wider uppercase text-slate-600 transition-colors hover:text-brand-primary dark:text-slate-300 dark:hover:text-brand-accent group py-1.5 whitespace-nowrap"
                 >
@@ -298,7 +298,7 @@ export default function Header({
                   initial={{ opacity: 0, x: 25 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 + idx * 0.05, duration: 0.4 }}
-                  key={link.name}
+                  key={`mob-nav-${link.name}-${idx}`}
                   href={link.href}
                   onClick={() => setMobileMenuOpen(false)}
                   className="group flex items-center justify-between rounded-2xl border border-white/5 bg-white/5 hover:bg-[#9D4EDD]/10 hover:border-[#9D4EDD]/30 p-4 text-base font-bold text-white transition-all duration-300"

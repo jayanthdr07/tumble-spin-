@@ -321,9 +321,9 @@ export default function InteractiveMiniMap({ onLocationSelected, initialAddress 
         {/* Search dropdown suggestions */}
         {showDropdown && searchResults.length > 0 && (
           <div className="absolute left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-brand-teal/20 shadow-lg z-20 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-            {searchResults.map(s => (
+            {searchResults.map((s, idx) => (
               <button
-                key={s.id}
+                key={`mini-search-${s.id}-${idx}`}
                 type="button"
                 onClick={() => handleSelectSector(s)}
                 className="w-full text-left px-3 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-brand-deep/40 transition-colors flex justify-between items-center"

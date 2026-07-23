@@ -1916,7 +1916,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                           return (
                             <button
                               type="button"
-                              key={srv.id}
+                              key={`lead-srv-${srv.id}`}
                               onClick={() => {
                                 if (isSelected) {
                                   setSelectedServices(selectedServices.filter(id => id !== srv.id));
@@ -2311,7 +2311,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                           const isSelected = selectedServices.includes(srv.id);
                           return (
                             <div
-                              key={srv.id}
+                              key={`booking-srv-${srv.id}`}
                               onClick={() => handleServiceToggle(srv.id)}
                               className={`relative cursor-pointer rounded-xl border p-4 transition-all duration-300 ${
                                 isSelected 

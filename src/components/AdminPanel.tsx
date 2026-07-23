@@ -2442,7 +2442,7 @@ export default function AdminPanel({
                               adjusted = Math.round(item.standard - (item.standard * pricingPercentage) / 100);
                             }
                             return (
-                              <div key={item.name} className="flex items-center justify-between text-xs py-1">
+                              <div key={`price-preview-${item.name}-${idx}`} className="flex items-center justify-between text-xs py-1">
                                 <span className="font-semibold text-slate-700 dark:text-slate-300">{item.name}</span>
                                 <span className="text-slate-400 line-through font-mono">₹{item.standard}</span>
                                 <span className={`font-extrabold font-mono text-sm ${
@@ -2632,10 +2632,10 @@ export default function AdminPanel({
                                 { id: 'shoe-spa', name: 'Premium Shoe Spa', unit: 'per pair', defaultPrice: 299 },
                               ]
                                 .filter(s => s.name.toLowerCase().includes(priceEditorSearch.toLowerCase()))
-                                .map(service => {
+                                .map((service, idx) => {
                                   const draftVal = localPricesDraft?.services?.[service.id] ?? '';
                                   return (
-                                    <div key={service.id} className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 flex-col sm:flex-row gap-3">
+                                    <div key={`editor-service-${service.id}-${idx}`} className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 flex-col sm:flex-row gap-3">
                                       <div className="space-y-0.5 self-start">
                                         <h5 className="text-xs font-extrabold text-slate-800 dark:text-white">{service.name}</h5>
                                         <p className="text-[10px] text-slate-400 font-mono">Default: ₹{service.defaultPrice} ({service.unit})</p>
@@ -2669,11 +2669,11 @@ export default function AdminPanel({
                             <div className="grid gap-4">
                               {ESTIMATOR_ITEMS
                                 .filter(item => item.name.toLowerCase().includes(priceEditorSearch.toLowerCase()))
-                                .map(item => {
+                                .map((item, idx) => {
                                   const dryCleanDraft = localPricesDraft?.estimator?.[item.id]?.dryClean ?? '';
                                   const steamIronDraft = localPricesDraft?.estimator?.[item.id]?.steamIron ?? '';
                                   return (
-                                    <div key={item.id} className="p-4 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 space-y-3">
+                                    <div key={`editor-estimator-${item.id}-${idx}`} className="p-4 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 space-y-3">
                                       <div className="flex items-center justify-between border-b border-slate-200/50 dark:border-brand-teal/5 pb-2">
                                         <span className="text-xs font-extrabold text-slate-800 dark:text-white">{item.name}</span>
                                         <span className="text-[9px] font-bold text-brand-primary dark:text-brand-accent uppercase font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-brand-deep/20 font-medium">
@@ -2750,10 +2750,10 @@ export default function AdminPanel({
                             <div className="grid gap-3">
                               {SUB_SERVICES
                                 .filter(item => item.name.toLowerCase().includes(priceEditorSearch.toLowerCase()))
-                                .map(item => {
+                                .map((item, idx) => {
                                   const draftVal = localPricesDraft?.booking?.[item.id] ?? '';
                                   return (
-                                    <div key={item.id} className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 flex-col sm:flex-row gap-3">
+                                    <div key={`editor-booking-${item.id}-${idx}`} className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-slate-50/50 dark:bg-brand-deep/5 flex-col sm:flex-row gap-3">
                                       <div className="space-y-0.5 self-start">
                                         <h5 className="text-xs font-extrabold text-slate-800 dark:text-white">{item.name}</h5>
                                         <p className="text-[10px] text-slate-400 font-mono">Default: ₹{item.price} ({item.serviceType})</p>
@@ -3399,12 +3399,12 @@ export default function AdminPanel({
                             <p className="text-[11px] text-slate-400">Click any garment package below to add it directly to customer's offline invoice:</p>
                             
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {OFFLINE_CATALOG_ITEMS.map(item => {
+                              {OFFLINE_CATALOG_ITEMS.map((item, idx) => {
                                 const inv = getItemInventory(item.id);
                                 const isOutOfStock = !inv.available || inv.stock <= 0;
                                 return (
                                   <button
-                                    key={item.id}
+                                    key={`${item.id}-${idx}`}
                                     type="button"
                                     disabled={isOutOfStock}
                                     onClick={() => handleAddCatalogToCart(item)}
@@ -3491,12 +3491,12 @@ export default function AdminPanel({
                                 </p>
                                 
                                 <div className="divide-y divide-slate-100 dark:divide-brand-teal/5 space-y-3 max-h-72 overflow-y-auto pr-1">
-                                  {Object.entries(inventory).map(([id, rawItem]) => {
+                                  {Object.entries(inventory).map(([id, rawItem], idx) => {
                                     const invItem = rawItem as { name: string; stock: number; available: boolean };
                                     const catalogItem = OFFLINE_CATALOG_ITEMS.find(c => c.id === id);
                                     if (!catalogItem) return null;
                                     return (
-                                      <div key={id} className="flex justify-between items-center text-xs pt-3 first:pt-0">
+                                      <div key={`inv-${id}-${idx}`} className="flex justify-between items-center text-xs pt-3 first:pt-0">
                                         <div className="space-y-0.5 max-w-[50%]">
                                           <p className="font-bold text-slate-800 dark:text-white truncate">{invItem.name || catalogItem.name}</p>
                                           <p className="text-[10px] text-slate-400 italic">{catalogItem.serviceType}</p>
@@ -3601,8 +3601,8 @@ export default function AdminPanel({
                             </div>
                           ) : (
                             <div className="space-y-3.5 max-h-60 overflow-y-auto pr-1">
-                              {offlineCart.map(item => (
-                                <div key={item.id} className="flex justify-between items-center text-xs pb-2 border-b border-slate-100 dark:border-brand-teal/5">
+                              {offlineCart.map((item, idx) => (
+                                <div key={`${item.id}-${idx}`} className="flex justify-between items-center text-xs pb-2 border-b border-slate-100 dark:border-brand-teal/5">
                                   <div className="space-y-0.5 max-w-[65%]">
                                     <p className="font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{item.name}</p>
                                     <p className="text-[10px] text-slate-400 italic">{item.serviceType}</p>

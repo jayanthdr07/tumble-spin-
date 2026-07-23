@@ -480,9 +480,9 @@ export default function ServiceAreasMap() {
                     exit={{ opacity: 0, y: -5 }}
                     className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-brand-dark border border-slate-100 dark:border-brand-teal/10 rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto z-50 text-left"
                   >
-                    {filteredSuggestions.map((n) => (
+                    {filteredSuggestions.map((n, idx) => (
                       <button
-                        key={n.id}
+                        key={`sugg-${n.id}-${idx}`}
                         onClick={() => {
                           setSelectedId(n.id);
                           setSearchQuery('');
@@ -616,9 +616,9 @@ export default function ServiceAreasMap() {
                 Direct Zone Selection ({NEIGHBORHOODS.length - 1} Neighborhoods)
               </span>
               <div className="grid grid-cols-2 gap-1.5 text-left">
-                {NEIGHBORHOODS.slice(1).map((n) => (
+                {NEIGHBORHOODS.slice(1).map((n, idx) => (
                   <button
-                    key={n.id}
+                    key={`grid-${n.id}-${idx}`}
                     onClick={() => setSelectedId(n.id)}
                     className={`px-3 py-2 rounded-xl text-[11px] font-bold font-sans transition-all flex items-center justify-between border ${
                       selectedId === n.id 

@@ -117,7 +117,7 @@ export default function TrustBar() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-6 divide-y md:divide-y-0 md:divide-x divide-slate-800 dark:divide-brand-teal/30">
           {statItems.map((item, idx) => (
             <div 
-              key={item.id} 
+              key={`trust-${item.id}-${idx}`} 
               className={`flex flex-col items-center text-center p-3 md:p-1 ${
                 idx > 0 && idx % 2 === 0 ? 'border-t sm:border-t-0' : ''
               }`}

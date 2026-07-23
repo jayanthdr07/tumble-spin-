@@ -235,8 +235,8 @@ export default function BookingConvenience({ appImage }: BookingConvenienceProps
 
             {/* List */}
             <div className="space-y-6 pt-4" id="app-highlights-list">
-              {features.map((feat) => (
-                <div key={feat.title} className="app-text-reveal flex items-start gap-4">
+              {features.map((feat, idx) => (
+                <div key={`feat-${feat.title}-${idx}`} className="app-text-reveal flex items-start gap-4">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
                     {feat.icon}
                   </div>

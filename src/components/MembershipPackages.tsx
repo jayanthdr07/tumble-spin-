@@ -342,8 +342,8 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                 "No Expiry – Use anytime at your convenience",
                 "Valid at all 1500+ Tumblespin stores across India",
                 "Cancel Anytime – Get full balance refund"
-              ].map((benefit) => (
-                <div key={benefit} className="flex items-start gap-3">
+              ].map((benefit, idx) => (
+                <div key={`benefit-${idx}`} className="flex items-start gap-3">
                   <span className="text-brand-primary dark:text-brand-accent mt-1">▶</span>
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                     {benefit}

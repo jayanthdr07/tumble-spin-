@@ -372,10 +372,10 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                     <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Tap "+ Add to estimate" on any garment above.</p>
                   </motion.div>
                 ) : (
-                  cart.map(item => (
+                  cart.map((item, idx) => (
                     <motion.div
                       layout
-                      key={`${item.id}-${item.serviceType}`}
+                      key={`${item.id}-${item.serviceType}-${idx}`}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
