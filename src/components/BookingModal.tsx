@@ -114,21 +114,6 @@ const SUB_CATEGORIES = [
   { id: 'laundry', name: 'Laundry/KG' }
 ];
 
-const loadRazorpayScript = () => {
-  return new Promise((resolve) => {
-    if ((window as any).Razorpay) {
-      resolve(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
-
 const safeJsonParse = async (response: Response, defaultError: string) => {
   try {
     const text = await response.clone().text();
@@ -366,8 +351,12 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
   }, [isSuccess, generatedOrderId]);
 
-  // Dynamic UPI QR Code Payment states
+  // Dynamic PhonePe & UPI Payment states
   const [showQrPayment, setShowQrPayment] = useState(false);
+  const [merchantTransactionId, setMerchantTransactionId] = useState('');
+  const [payUrl, setPayUrl] = useState('');
+  const [upiIntent, setUpiIntent] = useState('');
+  const [isSimulatingPhonePe, setIsSimulatingPhonePe] = useState(false);
   const [upiRefNo, setUpiRefNo] = useState('');
   const [userPaidAmount, setUserPaidAmount] = useState('');
   const [isAmountOverridden, setIsAmountOverridden] = useState(false);
@@ -405,11 +394,11 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
           serviceType: item.serviceType
         })),
         totalPrice: getGrandTotal(),
-        paymentMethod: 'UPI / Dynamic QR',
+        paymentMethod: 'PhonePe Payment Gateway',
         paymentDetails: {
-          type: 'UPI_QR',
-          label: 'UPI Dynamic QR (Verified)',
-          details: `Ref / UTR: ${upiRefNo || 'Real-time gateway verified'}`
+          type: 'PHONEPE_GATEWAY',
+          label: 'PhonePe Gateway (Verified)',
+          details: `Transaction ID: ${merchantTransactionId || generatedOrderId}`
         },
         dynamicPricing: dynamicPricing && dynamicPricing.mode !== 'none' ? {
           mode: dynamicPricing.mode,
@@ -424,23 +413,24 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
   };
 
   useEffect(() => {
-    if (!showQrPayment || !generatedOrderId) return;
+    if (!showQrPayment || (!generatedOrderId && !merchantTransactionId)) return;
 
     let active = true;
+    const targetId = merchantTransactionId || generatedOrderId;
     const interval = setInterval(async () => {
       try {
-        const res = await robustFetch(`/api/payments/status/${generatedOrderId}`);
+        const res = await robustFetch(`/api/phonepe/status/${targetId}`);
         if (!active) return;
         if (res.ok) {
           const data = await safeJsonParse(res, 'Transient status parsing error.');
-          if (data.paymentStatus === 'paid') {
+          if (data.paymentStatus === 'paid' || data.status === 'COMPLETED' || data.code === 'PAYMENT_SUCCESS') {
             clearInterval(interval);
             setPaymentStatus('success');
-            downloadSuccessInvoice(data.orderId);
+            downloadSuccessInvoice(data.orderId || generatedOrderId);
             setTimeout(() => {
               setShowQrPayment(false);
               setIsSuccess(true);
-            }, 2000);
+            }, 1500);
           }
         }
       } catch (err: any) {
@@ -452,7 +442,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
       active = false;
       clearInterval(interval);
     };
-  }, [showQrPayment, generatedOrderId]);
+  }, [showQrPayment, generatedOrderId, merchantTransactionId]);
 
   // QR Expiry countdown timer effect
   useEffect(() => {
@@ -824,130 +814,6 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
   };
 
-  // Trigger Razorpay Payment Gateway Flow
-  const handleRazorpayPayment = async (orderIdForReceipt: string, grandTotal: number): Promise<any> => {
-    const loaded = await loadRazorpayScript();
-    if (!loaded) {
-      throw new Error('Razorpay payment gateway SDK failed to load. Please check your internet connection and try again.');
-    }
-
-    // 1. Fetch Razorpay key configuration
-    let keyId = 'rzp_test_3P99p1Yg9OaVpE'; // fallback standard public sandboxed test key ID
-    try {
-      const configRes = await robustFetch('/api/payments/config');
-      if (configRes.ok && (configRes.headers.get('content-type') || '').includes('application/json')) {
-        const configData = await safeJsonParse(configRes, 'Failed to parse payment configuration.');
-        if (configData.keyId) {
-          keyId = configData.keyId;
-        }
-      }
-    } catch (err) {
-      console.warn('Could not fetch Razorpay configuration from server, falling back to Sandbox key:', err);
-    }
-
-    // 2. Create Order on Backend Server with Validation Parameters
-    let orderData;
-    try {
-      const orderRes = await robustFetch('/api/payments/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          amount: grandTotal,
-          quantities,
-          selectedServices,
-          dynamicPricing,
-          bookingDetails
-        }),
-      });
-
-      if (!orderRes.ok || !(orderRes.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('Failover: Serverless fallback triggered');
-      }
-
-      orderData = await safeJsonParse(orderRes, 'Failed to retrieve secure transaction order.');
-    } catch (err) {
-      console.warn('Backend payment order setup route unavailable. Falling back to sandbox checkout:', err);
-      orderData = {
-        amount: Math.round(grandTotal * 100),
-        currency: 'INR',
-        simulated: true,
-        id: `order_sim_${Math.random().toString(36).substr(2, 9)}`
-      };
-    }
-
-    return new Promise((resolve, reject) => {
-      const options = {
-        key: keyId,
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
-        name: 'Tumble Spin Laundry',
-        description: `Luxury Garment Care Booking: ${orderIdForReceipt}`,
-        image: 'https://cdn-icons-png.flaticon.com/512/2954/2954832.png',
-        order_id: orderData.simulated ? undefined : orderData.id, // pass order id if not simulated
-        handler: async function (response: any) {
-          try {
-            // If simulated order (dummy keys), verify locally
-            if (orderData.simulated) {
-              resolve({
-                verified: true,
-                paymentId: response.razorpay_payment_id || `pay_sim_${Math.random().toString(36).substr(2, 9)}`,
-                orderId: orderIdForReceipt,
-                simulated: true,
-              });
-              return;
-            }
-
-            // 3. Cryptographic backend verification
-            const verifyRes = await robustFetch('/api/payments/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
-
-            if (verifyRes.ok) {
-              const verifyData = await safeJsonParse(verifyRes, 'Verification details unreadable.');
-              resolve({
-                verified: true,
-                paymentId: response.razorpay_payment_id,
-                orderId: response.razorpay_order_id,
-                simulated: !!verifyData.simulated,
-              });
-            } else {
-              reject(new Error('Server-side cryptographic payment verification failed.'));
-            }
-          } catch (err) {
-            reject(err);
-          }
-        },
-        prefill: {
-          name: bookingDetails.fullName || '',
-          email: bookingDetails.email || '',
-          contact: bookingDetails.phone || '',
-        },
-        notes: {
-          address: bookingDetails.address || '',
-          pickup_slot: `${bookingDetails.pickupDate} [${bookingDetails.pickupTimeSlot}]`,
-          delivery_slot: `${bookingDetails.deliveryDate} [${bookingDetails.deliveryTimeSlot}]`,
-        },
-        theme: {
-          color: '#9D4EE7', // Tumble Spin brand primary purple
-        },
-        modal: {
-          ondismiss: function () {
-            reject(new Error('Payment window dismissed by user.'));
-          }
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-    });
-  };
-
   const generateUniqueOrderId = async () => {
     let nextNum = 103;
     try {
@@ -1157,10 +1023,11 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
 
     try {
-      const res = await robustFetch('/api/payments/create-qr-order', {
+      const res = await robustFetch('/api/phonepe/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          amount: grandTotal,
           bookingDetails,
           selectedServices,
           quantities,
@@ -1169,26 +1036,19 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
       });
 
       if (!res.ok || !(res.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('Failover: Serverless/static deployment detected.');
+        throw new Error('PhonePe gateway endpoint returned invalid response.');
       }
 
-      const data = await safeJsonParse(res, 'Failed to retrieve payment details.');
+      const data = await safeJsonParse(res, 'Failed to initiate PhonePe payment.');
       setGeneratedOrderId(data.orderId);
-      setQrCodeUrl(data.qrCodeUrl);
-      setQrVpa(data.vpa);
-      if (data.expiresAt) {
-        const secondsLeft = Math.max(0, Math.round((data.expiresAt - Date.now()) / 1000));
-        setQrTimeLeft(secondsLeft);
-      } else {
-        setQrTimeLeft(300); // 5 minutes default fallback
-      }
+      setMerchantTransactionId(data.merchantTransactionId || data.orderId);
+      setPayUrl(data.payUrl || '');
+      setQrCodeUrl(data.qrCodeUrl || '');
+      setUpiIntent(data.upiIntent || '');
+      setQrVpa(data.vpa || 'prakashcsat@oksbi');
+      setQrTimeLeft(600);
       setQrExpired(false);
-      
-      // Auto-fill payment amount and generate a secure mock UTR so they can click complete instantly
-      setUserPaidAmount(grandTotal.toString());
-      setUpiRefNo(Math.floor(100000000000 + Math.random() * 900000000000).toString());
 
-      // Guarantee order document is saved locally and in Firestore immediately
       const orderTimeline = [
         { step: 1, title: 'Order Confirmed', desc: 'Booking received and digital invoice dispatched.', time: new Date().toLocaleString(), done: true, active: true },
         { step: 2, title: 'Valet Pickup Completed', desc: 'Arjun Gowda is arriving for doorstep garment verification.', time: 'Scheduled', done: false, active: false },
@@ -1199,6 +1059,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
       const clientOrderDoc = data.orderDoc || {
         orderId: data.orderId,
+        merchantTransactionId: data.merchantTransactionId || data.orderId,
         adminViewed: false,
         fullName: bookingDetails.fullName || 'Valued Client',
         email: bookingDetails.email || 'client@tumblespin.com',
@@ -1224,15 +1085,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
         orderStatus: 'Pending',
         smsOptIn: smsOptIn,
         timeline: orderTimeline,
-        paymentMethod: 'UPI / Dynamic QR',
+        paymentMethod: 'PhonePe Payment Gateway',
         paymentDetails: {
-          type: 'UPI_QR',
-          label: 'UPI Dynamic QR (Pending)',
-          details: 'Awaiting gateway settlement...'
+          type: 'PHONEPE_GATEWAY',
+          label: 'PhonePe Gateway (Pending)',
+          details: 'Awaiting verified settlement...'
         },
         paymentStatus: 'pending',
-        paymentGateway: 'razorpay',
-        razorpayQrId: data.qrCodeId || `qr_sim_${Math.random().toString(36).substr(2, 9)}`,
+        paymentGateway: 'phonepe',
         createdAt: new Date().toISOString()
       };
 
@@ -1260,7 +1120,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
       setShowQrPayment(true);
     } catch (err: any) {
-      console.warn('Backend payment route unavailable or synchronizing. Falling back to secure, real-time client-side Firestore checkout:', err);
+      console.warn('Backend payment route fallback:', err);
       
       try {
         const clientOrderId = await generateUniqueOrderId();
@@ -1277,6 +1137,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
         const newOrderDoc = {
           orderId: clientOrderId,
+          merchantTransactionId: clientOrderId,
           adminViewed: false,
           fullName: bookingDetails.fullName || 'Valued Client',
           email: bookingDetails.email || 'client@tumblespin.com',
@@ -1308,15 +1169,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
           orderStatus: 'Pending',
           smsOptIn: smsOptIn,
           timeline: orderTimeline,
-          paymentMethod: 'UPI / Dynamic QR',
+          paymentMethod: 'PhonePe Payment Gateway',
           paymentDetails: {
-            type: 'UPI_QR',
-            label: 'UPI Dynamic QR (Pending)',
-            details: 'Awaiting gateway settlement...'
+            type: 'PHONEPE_GATEWAY',
+            label: 'PhonePe Gateway (Pending)',
+            details: 'Awaiting verified settlement...'
           },
           paymentStatus: 'pending',
-          paymentGateway: 'razorpay',
-          razorpayQrId: `qr_sim_${Math.random().toString(36).substr(2, 9)}`,
+          paymentGateway: 'phonepe',
           createdAt: new Date().toISOString()
         };
 
@@ -1337,22 +1197,20 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
           console.warn('Direct Firestore write failed, relying on automatic localStorage sync override:', fsErr);
         }
 
-        const upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${grandTotal.toFixed(2)}&cu=INR&tn=Order_${cleanOrderId}&tr=Order_${cleanOrderId}`;
-        const mockQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiIntent)}`;
+        const generatedUpiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${grandTotal.toFixed(2)}&cu=INR&tn=Order_${cleanOrderId}&tr=Order_${cleanOrderId}`;
+        const mockQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(generatedUpiIntent)}`;
 
         setGeneratedOrderId(clientOrderId);
+        setMerchantTransactionId(clientOrderId);
         setQrCodeUrl(mockQrUrl);
+        setUpiIntent(generatedUpiIntent);
         setQrVpa('prakashcsat@oksbi');
-        setQrTimeLeft(300);
+        setQrTimeLeft(600);
         setQrExpired(false);
-        
-        // Auto-fill payment amount and generate a secure mock UTR so they can click complete instantly
-        setUserPaidAmount(grandTotal.toString());
-        setUpiRefNo(Math.floor(100000000000 + Math.random() * 900000000000).toString());
 
         setShowQrPayment(true);
       } catch (innerErr: any) {
-        console.error('Ultimate client-side fallback booking failure:', innerErr);
+        console.error('Client-side fallback booking failure:', innerErr);
         setFormErrors({ payment: 'Booking failure: ' + (innerErr.message || 'Please verify network connection.') });
       }
     } finally {
@@ -2204,440 +2062,182 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                   id="booking-qr-payment-screen"
                 >
                   <div className="text-center space-y-1">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent">
-                      🔒 NPCI Secure UPI QR Gateway
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-600/10 text-purple-700 dark:bg-purple-400/10 dark:text-purple-300">
+                      🔒 PhonePe Business Secure Gateway
                     </span>
                     <h4 className="text-lg font-serif font-bold text-slate-900 dark:text-white pt-1">
-                      Scan & Complete Payment
+                      Complete Your Payment via PhonePe
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                      Scan the dynamic QR code below or click the direct payment link to complete your transfer.
+                      Scan the dynamic PhonePe QR code or click the payment link below. Your booking will automatically move to confirmed once payment is verified.
                     </p>
                   </div>
 
-                  {/* Responsive Side-by-Side Layout to Avoid Overlapping and Double Scrollbars */}
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start w-full">
-                    
-                    {/* Left Column: QR Code Container */}
+                    {/* Left Column: PhonePe QR Code Container */}
                     <div className="md:col-span-6 flex flex-col items-center">
-
-                  {/* QR Core Container */}
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-brand-teal/20 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[280px] mx-auto">
-                    <div className="relative p-3 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center">
-                      <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                          `upi://pay?pa=${qrVpa || 'prakashcsat@oksbi'}&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`
-                        )}`}
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          const upiIntent = `upi://pay?pa=${qrVpa || 'prakashcsat@oksbi'}&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`;
-                          const alternateUrl = `https://quickchart.io/qr?size=250&text=${encodeURIComponent(upiIntent)}`;
-                          if (target.src !== alternateUrl) {
-                            target.src = alternateUrl;
-                          }
-                        }}
-                        alt="Dynamic UPI QR"
-                        className={`h-36 w-36 object-contain rounded-lg transition-all duration-300 ${qrExpired ? 'opacity-20 blur-[1.5px]' : ''}`}
-                        referrerPolicy="no-referrer"
-                      />
-                      {qrExpired && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 rounded-2xl text-white p-2 text-center">
-                          <span className="text-[10px] font-black tracking-wider uppercase bg-rose-500 px-2 py-0.5 rounded-full mb-1">
-                            Expired
-                          </span>
-                          <button
-                            type="button"
-                            onClick={handleRefreshQrPayment}
-                            disabled={isRefreshingQr}
-                            className="text-[11px] font-black bg-white text-slate-900 px-3 py-1.5 rounded-full hover:bg-slate-100 transition-colors shadow-sm flex items-center gap-1 cursor-pointer"
-                          >
-                            {isRefreshingQr ? (
-                              <span className="h-3 w-3 animate-spin rounded-full border border-slate-950 border-t-transparent" />
-                            ) : null}
-                            Regenerate
-                          </button>
+                      <div className="p-4 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[280px] mx-auto">
+                        <div className="relative p-3 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center">
+                          <img 
+                            src={qrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+                              upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`
+                            )}`}
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              const fallbackIntent = upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`;
+                              const alternateUrl = `https://quickchart.io/qr?size=250&text=${encodeURIComponent(fallbackIntent)}`;
+                              if (target.src !== alternateUrl) {
+                                target.src = alternateUrl;
+                              }
+                            }}
+                            alt="Dynamic PhonePe QR"
+                            className={`h-40 w-40 object-contain rounded-lg transition-all duration-300 ${qrExpired ? 'opacity-20 blur-[1.5px]' : ''}`}
+                            referrerPolicy="no-referrer"
+                          />
+                          {qrExpired && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 rounded-2xl text-white p-2 text-center">
+                              <span className="text-[10px] font-black tracking-wider uppercase bg-rose-500 px-2 py-0.5 rounded-full mb-1">
+                                QR Expired
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <p className="text-[9px] text-slate-400 font-bold tracking-widest font-mono uppercase">VPA: {qrVpa || 'prakashcsat@oksbi'}</p>
+                        <p className="text-[9.5px] text-purple-700 dark:text-purple-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
+                          <span>🟣</span> PhonePe Dynamic QR
+                        </p>
 
-                    {/* Countdown / Expiry text */}
-                    {qrTimeLeft !== null && (
-                      <div className="pt-0.5">
-                        {qrExpired ? (
-                          <span className="text-[9px] font-bold text-rose-500 font-mono">
-                            ⚠️ QR code has expired
-                          </span>
-                        ) : (
-                          <div className="flex items-center gap-1 text-[10px] font-bold text-amber-500 font-mono">
-                            <Clock className="h-3 w-3 animate-pulse" />
-                            <span>Expires in: {Math.floor(qrTimeLeft / 60)}:{(qrTimeLeft % 60).toString().padStart(2, '0')}</span>
+                        {qrTimeLeft !== null && (
+                          <div className="pt-0.5">
+                            {qrExpired ? (
+                              <span className="text-[9px] font-bold text-rose-500 font-mono">
+                                ⚠️ Session expired
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-300 font-mono">
+                                <Clock className="h-3 w-3 animate-pulse" />
+                                <span>Expires in: {Math.floor(qrTimeLeft / 60)}:{(qrTimeLeft % 60).toString().padStart(2, '0')}</span>
+                              </div>
+                            )}
                           </div>
                         )}
+
+                        <div className="pt-1.5 border-t border-purple-100 dark:border-purple-900/40 w-full text-center">
+                          <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                            Scan with PhonePe, GPay, Paytm or BHIM
+                          </p>
+                        </div>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Direct Razorpay.me Info */}
-                    <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/80 w-full text-center">
-                      <p className="text-[9.5px] text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wider">
-                        Scan with BHIM, GPay, PhonePe, Paytm, or any UPI App
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column: Metadata & Input Form */}
-                <div className="md:col-span-6 space-y-4">
-                  {/* Payment Metadata Cards */}
-                  <div className="w-full bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/10 rounded-2xl p-3.5 grid grid-cols-2 gap-3 shadow-xs">
-                    <div className="space-y-0.5">
-                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Amount</p>
-                      <p className="text-sm font-black font-mono text-slate-800 dark:text-white">₹{getGrandTotal()}</p>
-                    </div>
-                    <div className="space-y-0.5 text-right">
-                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Order ID</p>
-                      <p className="text-xs font-black font-mono text-brand-primary dark:text-brand-accent">{generatedOrderId}</p>
-                    </div>
-                    <div className="space-y-0.5 col-span-2 border-t border-slate-100 dark:border-brand-teal/10 pt-1.5">
-                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Merchant Name</p>
-                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">Tumble Spin Laundry & Care</p>
-                    </div>
-                  </div>
-
-                  {/* High-Visibility Direct Payment Link Action Card */}
-                  <div className="w-full bg-linear-to-br from-brand-primary/5 to-brand-secondary/5 dark:from-brand-accent/5 dark:to-brand-teal/5 border border-brand-primary/10 dark:border-brand-accent/15 rounded-2xl p-4 text-center flex flex-col items-center space-y-2.5 shadow-xs">
-                    <div>
-                      <p className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center justify-center gap-1.5">
-                        🔗 Direct Online Payment Gateway
-                      </p>
-                      <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-relaxed mt-1">
-                        Paying from your phone or having trouble scanning? Tap the official Razorpay link below:
-                      </p>
-                    </div>
-                    <a 
-                      href={finalPaymentUrl.includes('razorpay.me') ? finalPaymentUrl : `${finalPaymentUrl}${finalPaymentUrl.includes('?') ? '&' : '?'}amount=${Number(getGrandTotal()).toFixed(2)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      id="direct-razorpay-link-btn"
-                      className="w-full inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-primary text-white hover:bg-brand-deep dark:bg-brand-accent dark:text-brand-deep font-extrabold text-xs uppercase tracking-widest shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      {finalPaymentUrl}
-                    </a>
-                    <p className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">
-                      {finalPaymentUrl.includes('razorpay.me') 
-                        ? `Please pay ₹${Number(getGrandTotal()).toFixed(2)} on the Razorpay page`
-                        : `Amount Pre-filled: ₹${Number(getGrandTotal()).toFixed(2)}`
-                      } • Powered by Razorpay Secure
-                    </p>
-                  </div>
-
-                  {/* Reference No / UTR Input */}
-                  <form onSubmit={handleVerifyAndCompleteQrPayment} className="w-full max-w-md space-y-4 pt-1">
-                    {/* Amount Matching & Verification Utility */}
-                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-brand-deep/20 border border-slate-100 dark:border-brand-teal/10 space-y-3 shadow-xs">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                          💼 Ledger Amount Validation
-                        </h4>
-                        <span className="text-[9px] bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent px-2 py-0.5 rounded-full font-bold">
-                          Client-Side Utility
-                        </span>
+                    {/* Right Column: Gateway Links & Auto Polling Status */}
+                    <div className="md:col-span-6 space-y-4">
+                      {/* Payment Metadata Cards */}
+                      <div className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 grid grid-cols-2 gap-3 shadow-xs">
+                        <div className="space-y-0.5">
+                          <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Payable Amount</p>
+                          <p className="text-base font-black font-mono text-purple-700 dark:text-purple-300">₹{getGrandTotal()}</p>
+                        </div>
+                        <div className="space-y-0.5 text-right">
+                          <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Txn / Order ID</p>
+                          <p className="text-xs font-black font-mono text-slate-800 dark:text-white">{merchantTransactionId || generatedOrderId}</p>
+                        </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex justify-between items-center">
-                          <span>Transaction Amount Paid (INR)</span>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setIsFetchingHistory(true);
-                              await new Promise(resolve => setTimeout(resolve, 800));
-                              setUserPaidAmount(Number(getGrandTotal()).toFixed(2));
-                              setIsFetchingHistory(false);
-                            }}
-                            disabled={isFetchingHistory}
-                            className="text-[9px] text-brand-primary dark:text-brand-accent font-black hover:underline cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                      {/* PhonePe Pay Link */}
+                      <div className="w-full bg-purple-50/80 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/40 rounded-2xl p-4 text-center flex flex-col items-center space-y-3 shadow-xs">
+                        <div>
+                          <p className="text-xs font-black text-purple-900 dark:text-purple-200 uppercase tracking-wider flex items-center justify-center gap-1.5">
+                            ⚡ PhonePe Payment Gateway Link
+                          </p>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mt-1">
+                            Click below to complete payment directly on the PhonePe web/app payment gateway.
+                          </p>
+                        </div>
+
+                        {payUrl ? (
+                          <a 
+                            href={payUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-purple-600 text-white hover:bg-purple-700 dark:bg-purple-500 dark:text-white font-black text-xs uppercase tracking-widest shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
                           >
-                            {isFetchingHistory ? (
-                              <>
-                                <span className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent" />
-                                Syncing UPI History...
-                              </>
-                            ) : (
-                              '⚡ Fetch From UPI App History'
-                            )}
-                          </button>
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">₹</span>
-                          <input 
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="0.00"
-                            value={userPaidAmount}
-                            onChange={(e) => {
-                              setUserPaidAmount(e.target.value);
-                              setIsAmountOverridden(false); // reset override if edited
-                            }}
-                            className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold tracking-wider font-mono text-slate-800 focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10 dark:border-brand-teal/20 dark:bg-brand-dark dark:text-white dark:focus:border-brand-accent"
-                            disabled={isVerifyingQr || isRefreshingQr || isFetchingHistory}
-                            required
-                          />
-                        </div>
+                            <ExternalLink className="h-4 w-4" />
+                            Pay ₹{getGrandTotal()} via PhonePe
+                          </a>
+                        ) : (
+                          <a 
+                            href={upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${getGrandTotal()}&cu=INR`}
+                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-purple-600 text-white hover:bg-purple-700 font-black text-xs uppercase tracking-widest shadow-md transition-all cursor-pointer"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Open PhonePe App (UPI)
+                          </a>
+                        )}
                       </div>
 
-                      {/* Real-time Matching Status Badge */}
-                      {userPaidAmount && (
-                        <div className="pt-1">
-                          {(() => {
-                            const entered = Number(userPaidAmount);
-                            const expected = Number(getGrandTotal());
-                            if (isNaN(entered) || entered <= 0) {
-                              return (
-                                <div className="p-2.5 rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-300 text-[10px] font-medium flex items-center gap-2">
-                                  <span>ℹ️</span> Please enter a valid number greater than zero.
-                                </div>
-                              );
-                            }
-                            if (Math.abs(entered - expected) < 0.01) {
-                              return (
-                                <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900/30 text-[10px] font-bold flex flex-col gap-1">
-                                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider text-[9px] font-black">
-                                    ✅ PERFECT MATCH (Ledger Aligned)
-                                  </span>
-                                  <span>The paid amount of ₹{entered.toFixed(2)} matches the quoted price exactly. Ready for seamless auto-clearance.</span>
-                                </div>
-                              );
-                            }
-                            if (entered < expected) {
-                              return (
-                                <div className="p-2.5 rounded-xl bg-rose-50/70 text-rose-800 dark:bg-rose-950/20 dark:text-rose-300 border border-rose-100 dark:border-rose-900/20 text-[10px] font-medium flex flex-col gap-1.5">
-                                  <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 uppercase tracking-wider text-[9px] font-black">
-                                    ⚠️ AMOUNT MISMATCH (UNDERPAID)
-                                  </span>
-                                  <span>Paid amount ₹{entered.toFixed(2)} is less than the quoted price (₹{expected.toFixed(2)}). Underpaid amounts may cause system holds.</span>
-                                  <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
-                                    <input 
-                                      type="checkbox"
-                                      checked={isAmountOverridden}
-                                      onChange={(e) => setIsAmountOverridden(e.target.checked)}
-                                      className="rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
-                                    />
-                                    <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Acknowledge mismatch & force submit</span>
-                                  </label>
-                                </div>
-                              );
-                            }
-                            return (
-                              <div className="p-2.5 rounded-xl bg-amber-50/70 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300 border border-amber-100 dark:border-amber-900/20 text-[10px] font-medium flex flex-col gap-1.5">
-                                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 uppercase tracking-wider text-[9px] font-black">
-                                  ⚠️ AMOUNT MISMATCH (OVERPAID)
-                                </span>
-                                <span>Paid amount ₹{entered.toFixed(2)} exceeds the quoted price (₹{expected.toFixed(2)}). Excess tips will be credited as laundry coins.</span>
-                                <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
-                                  <input 
-                                    type="checkbox"
-                                    checked={isAmountOverridden}
-                                    onChange={(e) => setIsAmountOverridden(e.target.checked)}
-                                    className="rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
-                                  />
-                                  <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Acknowledge mismatch & force submit</span>
-                                </label>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wide flex justify-between">
-                        <span>UPI Transaction ID / 12-Digit UTR</span>
-                        <span className="text-brand-primary dark:text-brand-accent font-black">* Required</span>
-                      </label>
-                      <input 
-                        type="text"
-                        pattern="\d*"
-                        maxLength={16}
-                        placeholder="e.g. 618274938201"
-                        value={upiRefNo}
-                        onChange={(e) => setUpiRefNo(e.target.value.replace(/\D/g, ''))}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-semibold tracking-wider font-mono text-slate-800 focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10 dark:border-brand-teal/20 dark:bg-brand-dark dark:text-white dark:focus:border-brand-accent dark:focus:ring-brand-accent/10"
-                        disabled={isVerifyingQr || isRefreshingQr}
-                        required
-                      />
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-normal">
-                        {qrExpired ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                            ⚠️ Since the QR is expired, if you haven't paid yet, please generate a new QR below. If you already sent the money, submit the UTR to verify.
+                      {/* Real-time Backend Status Indicator */}
+                      <div className="p-4 rounded-2xl bg-slate-900 text-white dark:bg-slate-950 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                            Backend Verification Active
                           </span>
-                        ) : (
-                          "Submit the 12-digit UPI transaction reference or UTR number from GPay/PhonePe to verify with the bank ledger."
-                        )}
-                      </p>
+                          <span className="text-[10px] font-mono text-slate-400">Polling every 3s</span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                          We are listening for secure settlement notification from PhonePe. Once verified, this screen will move directly to Success!
+                        </p>
+                      </div>
 
-                      {/* Manual Verify UTR Trigger */}
+                      {/* Developer Sandbox Simulation Button */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsSimulatingPhonePe(true);
+                            try {
+                              const res = await robustFetch('/api/phonepe/simulate-payment', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  orderId: generatedOrderId,
+                                  merchantTransactionId,
+                                  amount: getGrandTotal()
+                                })
+                              });
+                              if (res.ok) {
+                                console.log('[PhonePe Simulation] Backend payment verified successfully.');
+                              }
+                            } catch (simErr) {
+                              console.error('Simulation error:', simErr);
+                            } finally {
+                              setIsSimulatingPhonePe(false);
+                            }
+                          }}
+                          disabled={isSimulatingPhonePe}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          {isSimulatingPhonePe ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white border-t-transparent" />
+                          ) : (
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                          )}
+                          <span>⚡ Simulate PhonePe Payment Success (Sandbox Test)</span>
+                        </button>
+                      </div>
+
                       <div className="pt-1">
                         <button
                           type="button"
-                          onClick={handleManualVerifyPayment}
-                          disabled={isVerifyingQr || isRefreshingQr || manualVerifyStatus === 'verifying' || !upiRefNo.trim()}
-                          className="w-full py-2.5 bg-slate-900 text-white dark:bg-brand-accent dark:text-brand-deep rounded-xl text-xs font-black uppercase tracking-wider hover:opacity-95 active:scale-[0.99] transition-all disabled:opacity-45 disabled:pointer-events-none flex items-center justify-center gap-1.5 cursor-pointer"
+                          onClick={() => setShowQrPayment(false)}
+                          className="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 cursor-pointer"
                         >
-                          {manualVerifyStatus === 'verifying' ? (
-                            <>
-                              <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
-                              Connecting to Bank Ledger...
-                            </>
-                          ) : (
-                            <>
-                              <ShieldCheck className="h-3.5 w-3.5 text-brand-primary dark:text-brand-deep" />
-                              Verify Payment (Manual UTR Check)
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Manual Verification Feedback Panel */}
-                      {manualVerifyStatus !== 'idle' && (
-                        <div className={`p-3 rounded-xl border text-[11px] font-medium transition-all ${
-                          manualVerifyStatus === 'success'
-                            ? 'bg-emerald-50/70 border-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-900/30 dark:text-emerald-300'
-                            : manualVerifyStatus === 'failed'
-                              ? 'bg-rose-50/70 border-rose-100 text-rose-800 dark:bg-rose-950/20 dark:border-rose-900/30 dark:text-rose-300'
-                              : 'bg-slate-50 border-slate-100 text-slate-600 dark:bg-slate-900/40 dark:border-slate-800 dark:text-slate-400'
-                        }`}>
-                          <div className="flex items-start gap-2">
-                            <span className="mt-0.5 font-bold">
-                              {manualVerifyStatus === 'success' ? '✅' : manualVerifyStatus === 'failed' ? '❌' : 'ℹ️'}
-                            </span>
-                            <div className="space-y-1">
-                              <span className="block font-black uppercase tracking-wider text-[9px]">
-                                {manualVerifyStatus === 'success' ? 'UTR Ledger Matches' : manualVerifyStatus === 'failed' ? 'Ledger Reject' : 'Auditing Reference'}
-                              </span>
-                              <p className="leading-relaxed">{manualVerifyFeedback}</p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {formErrors.qrPayment && (
-                      <p className="text-xs font-semibold text-rose-500 flex items-center gap-1">
-                        ⚠️ {formErrors.qrPayment}
-                      </p>
-                    )}
-
-                    {isVerifyingQr && (
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800 space-y-3 shadow-xs">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Gateway Sync Progress</span>
-                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-primary dark:border-brand-accent border-t-transparent shrink-0" />
-                        </div>
-                        
-                        {/* Interactive Steps */}
-                        <div className="space-y-2.5">
-                          {[
-                            { label: 'Bank Node Handshake', key: 'handshake' },
-                            { label: 'Ledger Audit Sequence', key: 'settlement' },
-                            { label: 'Cloud Firestore Sync', key: 'Firestore' },
-                            { label: 'Slot Clearance Authorization', key: 'authorized' }
-                          ].map((stepItem, idx) => {
-                            const getSyncStep = (msg: string) => {
-                              if (msg.includes('handshake') || msg.includes('Establishing')) return 0;
-                              if (msg.includes('settlement') || msg.includes('locally') || msg.includes('Verifying transaction')) return 1;
-                              if (msg.includes('Firestore') || msg.includes('relying on')) return 2;
-                              if (msg.includes('authorized') || msg.includes('Provisioning')) return 3;
-                              return 0;
-                            };
-                            const activeStep = getSyncStep(qrVerificationMsg);
-                            const isCompleted = idx < activeStep;
-                            const isActive = idx === activeStep;
-                            
-                            return (
-                              <div key={stepItem.key} className="flex items-center gap-3">
-                                <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 transition-all ${
-                                  isCompleted 
-                                    ? 'bg-emerald-500 text-white' 
-                                    : isActive 
-                                      ? 'bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep animate-pulse' 
-                                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
-                                }`}>
-                                  {isCompleted ? '✓' : idx + 1}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className={`text-[11px] font-bold transition-all ${
-                                    isCompleted 
-                                      ? 'text-emerald-600 dark:text-emerald-400 line-through opacity-75' 
-                                      : isActive 
-                                        ? 'text-brand-primary dark:text-brand-accent font-black' 
-                                        : 'text-slate-400 dark:text-slate-500'
-                                  }`}>
-                                    {stepItem.label}
-                                  </span>
-                                  {isActive && (
-                                    <span className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 font-mono animate-pulse">
-                                      {qrVerificationMsg}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Action controls */}
-                    <div className="flex flex-col gap-2.5 pt-2">
-                      {qrExpired && (
-                        <button
-                          type="button"
-                          onClick={handleRefreshQrPayment}
-                          disabled={isRefreshingQr || isVerifyingQr}
-                          className="w-full py-3 bg-amber-500 text-white dark:bg-amber-400 dark:text-slate-950 text-xs font-black uppercase tracking-wider shadow-md hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2 rounded-full transition-all cursor-pointer"
-                        >
-                          {isRefreshingQr ? (
-                            <span className="h-4 w-4 animate-spin rounded-full border border-white dark:border-slate-950 border-t-transparent" />
-                          ) : (
-                            <Clock className="h-4 w-4 shrink-0" />
-                          )}
-                          <span>Generate Fresh QR Code</span>
-                        </button>
-                      )}
-
-                      <div className="flex gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowQrPayment(false);
-                            setUpiRefNo('');
-                          }}
-                          disabled={isVerifyingQr || isRefreshingQr}
-                          className="flex-1 py-3 rounded-full border border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 dark:border-brand-teal/20 dark:bg-brand-dark dark:text-slate-300 dark:hover:bg-slate-900 disabled:opacity-50"
-                        >
-                          Back
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isVerifyingQr || isRefreshingQr}
-                          className="flex-2 py-3 bg-linear-to-r from-brand-primary to-brand-secondary text-xs font-black uppercase tracking-wider text-white shadow-md hover:opacity-95 dark:from-brand-accent dark:to-brand-teal dark:text-brand-deep disabled:opacity-50 flex items-center justify-center gap-1.5 rounded-full px-6"
-                        >
-                          {isVerifyingQr ? (
-                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white dark:border-slate-deep border-t-transparent shrink-0" />
-                          ) : (
-                            <ShieldCheck className="h-4 w-4" />
-                          )}
-                          Verify & Complete Booking
+                          Close / Cancel
                         </button>
                       </div>
                     </div>
-                  </form>
-                </div>
-              </div>
-            </motion.div>
+                  </div>
+                </motion.div>
               ) : (
                 <form onSubmit={handleSubmitBooking}>
                   
