@@ -554,7 +554,7 @@ export default function Testimonials() {
                     {/* Stars */}
                     <div className="flex gap-1 text-amber-400">
                       {[...Array(5)].map((_, i) => (
-                        <Star key={i} className={`h-4 w-4 ${i < test.rating ? 'fill-current stroke-none' : 'text-slate-200 dark:text-slate-800'}`} />
+                        <Star key={`review-star-${test.id}-${index}-${i}`} className={`h-4 w-4 ${i < test.rating ? 'fill-current stroke-none' : 'text-slate-200 dark:text-slate-800'}`} />
                       ))}
                     </div>
 

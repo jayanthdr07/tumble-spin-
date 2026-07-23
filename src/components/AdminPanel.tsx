@@ -3812,11 +3812,11 @@ export default function AdminPanel({
                               <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">No customers found</p>
                             </div>
                           ) : (
-                            filteredCustomers.map(c => {
+                            filteredCustomers.map((c, idx) => {
                               const isSelected = selectedCustomerKey === c.key;
                               return (
                                 <div
-                                  key={c.key}
+                                  key={`${c.key}-${idx}`}
                                   onClick={() => setSelectedCustomerKey(c.key)}
                                   className={`p-3.5 rounded-2xl border text-left cursor-pointer transition-all ${
                                     isSelected

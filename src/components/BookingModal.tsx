@@ -1584,7 +1584,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
             {!isSuccess && !showQrPayment && (
               <div className="px-6 py-3 bg-slate-100/50 dark:bg-brand-deep/10 border-b border-slate-100 dark:border-brand-teal/5 flex gap-1 justify-between shrink-0">
                 {[1, 2, 3, 4, 5].map((s) => (
-                  <div key={s} className="flex-1 flex flex-col gap-1">
+                  <div key={`modal-step-bar-${s}`} className="flex-1 flex flex-col gap-1">
                     <div className={`h-1.5 rounded-full transition-colors ${
                       step >= s 
                         ? 'bg-brand-primary dark:bg-brand-accent' 

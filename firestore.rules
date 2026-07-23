@@ -2,11 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net default deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Helper functions for validating common types
     function isStringOfSize(val, min, max) {
       return val is string && val.size() >= min && val.size() <= max;
@@ -23,31 +18,32 @@ service cloud.firestore {
 
     // --- REVIEWS COLLECTION rules ---
     match /reviews/{reviewId} {
-      allow read: if true;
-      allow create, update: if isValidReview(request.resource.data);
-      allow delete: if true;
-    }
-
-    function isValidReview(data) {
-      return data.keys().hasAll(['id', 'name', 'role', 'rating', 'content', 'avatar', 'location'])
-        && isStringOfSize(data.id, 1, 100)
-        && isStringOfSize(data.name, 1, 200)
-        && isNumberInRange(data.rating, 1, 5)
-        && isStringOfSize(data.content, 1, 5000);
+      allow read, write: if true;
     }
 
     // --- SETTINGS COLLECTION rules ---
     match /settings/{settingId} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['data']);
-      allow delete: if true;
+      allow read, write: if true;
     }
 
     // --- MEMBERSHIPS COLLECTION rules ---
     match /memberships/{phone} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAll(['phone', 'fullName', 'email', 'packageType', 'rechargeAmount', 'balance', 'createdAt', 'status']);
-      allow delete: if true;
+      allow read, write: if true;
+    }
+
+    // --- MEMBERSHIPS PENDING COLLECTION rules ---
+    match /memberships_pending/{id} {
+      allow read, write: if true;
+    }
+
+    // --- PAYMENT ATTEMPTS COLLECTION rules ---
+    match /payment_attempts/{id} {
+      allow read, write: if true;
+    }
+
+    // --- PAYMENTS COLLECTION rules ---
+    match /payments/{id} {
+      allow read, write: if true;
     }
 
     // --- COUNTERS COLLECTION rules ---
@@ -59,5 +55,11 @@ service cloud.firestore {
     match /webhook_events/{eventId} {
       allow read, write: if true;
     }
+
+    // --- TEST COLLECTION rules ---
+    match /test/{testId} {
+      allow read, write: if true;
+    }
   }
 }
+

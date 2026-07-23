@@ -48,6 +48,21 @@
         "data": { "type": "object", "description": "Generic settings payload wrapper" }
       },
       "required": ["data"]
+    },
+    "Membership": {
+      "title": "Membership",
+      "description": "User membership package subscription",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "packageType": { "type": "string" },
+        "rechargeAmount": { "type": "number" },
+        "balance": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -62,6 +77,30 @@
     "/settings/{settingId}": {
       "schema": "Setting",
       "description": "Collection of system configuration documents"
+    },
+    "/memberships/{phone}": {
+      "schema": "Membership",
+      "description": "Collection of active memberships"
+    },
+    "/memberships_pending/{id}": {
+      "schema": "Membership",
+      "description": "Collection of pending membership payments"
+    },
+    "/payment_attempts/{id}": {
+      "schema": "Setting",
+      "description": "Collection of payment attempt logs"
+    },
+    "/payments/{id}": {
+      "schema": "Setting",
+      "description": "Collection of verified payment transactions"
+    },
+    "/counters/{counterId}": {
+      "schema": "Setting",
+      "description": "Collection of sequence counters"
+    },
+    "/webhook_events/{eventId}": {
+      "schema": "Setting",
+      "description": "Collection of processed webhooks"
     }
   }
 }
