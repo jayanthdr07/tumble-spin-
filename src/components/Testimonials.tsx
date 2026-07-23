@@ -255,7 +255,7 @@ export default function Testimonials() {
                 const isFull = i < Math.floor(Number(averageRating));
                 return (
                   <Star 
-                    key={i} 
+                    key={`avg-star-${i}`} 
                     className={`h-5 w-5 ${isFull ? 'fill-amber-400 stroke-none' : 'text-slate-300 fill-slate-200 dark:text-slate-700 dark:fill-slate-800'}`} 
                   />
                 );
@@ -275,7 +275,7 @@ export default function Testimonials() {
               const count = ratingCounts[stars - 1] || 0;
               const percentage = totalRatingsCount > 0 ? (count / totalRatingsCount) * 100 : 0;
               return (
-                <div key={stars} className="flex items-center gap-3.5 text-xs">
+                <div key={`star-breakdown-${stars}`} className="flex items-center gap-3.5 text-xs">
                   <span className="w-12 font-bold text-slate-700 dark:text-slate-300 flex items-center justify-end gap-1 shrink-0 font-mono">
                     {stars} <Star className="h-3 w-3 fill-amber-400 stroke-none inline" />
                   </span>
@@ -475,7 +475,7 @@ export default function Testimonials() {
                   <div className="flex gap-1.5 pt-1 text-amber-400">
                     {[1, 2, 3, 4, 5].map((stars) => (
                       <button
-                        key={stars}
+                        key={`form-star-${stars}`}
                         type="button"
                         onClick={() => handleRatingChange(stars)}
                         className="transition-transform active:scale-95"

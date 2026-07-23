@@ -497,7 +497,7 @@ export default function OrderTracking() {
                       }
                     ].map((node) => {
                       return (
-                        <div key={node.id} className="flex flex-col items-center text-center space-y-1.5">
+                        <div key={`track-node-${node.id}`} className="flex flex-col items-center text-center space-y-1.5">
                           {/* Circle indicator */}
                           <div className={`relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all duration-300 ${
                             node.isDone

@@ -2427,7 +2427,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                                 return (
                                   <button
                                     type="button"
-                                    key={opt.value}
+                                    key={`pickup-slot-${opt.value}`}
                                     onClick={() => setBookingDetails(prev => ({ ...prev, pickupTimeSlot: opt.value }))}
                                     className={`flex items-start gap-2 rounded-2xl border p-2.5 text-left transition-all cursor-pointer ${
                                       isSelected
@@ -2505,7 +2505,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                                 return (
                                   <button
                                     type="button"
-                                    key={opt.value}
+                                    key={`deliv-slot-${opt.value}`}
                                     onClick={() => setBookingDetails(prev => ({ ...prev, deliveryTimeSlot: opt.value }))}
                                     className={`flex items-start gap-2 rounded-2xl border p-2.5 text-left transition-all cursor-pointer ${
                                       isSelected
@@ -2640,10 +2640,10 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
                       {/* Subcategory horizontal navigation tabs */}
                       <div className="flex overflow-x-auto gap-1.5 pb-2.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-brand-teal/20">
-                        {SUB_CATEGORIES.map(sc => (
+                        {SUB_CATEGORIES.map((sc, scIdx) => (
                           <button
                             type="button"
-                            key={sc.id}
+                            key={`sc-tab-${sc.id}-${scIdx}`}
                             onClick={() => setActiveSubCategory(sc.id)}
                             className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap uppercase tracking-wider transition-all shrink-0 ${
                               activeSubCategory === sc.id

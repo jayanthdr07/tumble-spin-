@@ -187,7 +187,7 @@ export default function BeforeAfter() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" id="before-after-skeleton">
             {Array.from({ length: 3 }).map((_, index) => (
               <div
-                key={index}
+                key={`ba-skel-${index}`}
                 className="bg-white/80 dark:bg-brand-deep/20 rounded-3xl overflow-hidden border border-slate-100/60 dark:border-brand-teal/10 p-0 shadow-2xs space-y-5 animate-pulse flex flex-col h-full"
               >
                 {/* Image Placeholder */}
@@ -225,12 +225,12 @@ export default function BeforeAfter() {
           /* Before After Interactive Grid */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             <AnimatePresence mode="popLayout">
-              {filteredItems.map(item => {
+              {filteredItems.map((item, idx) => {
                 const isRevealed = isRevealedMap[item.id] || false;
                 return (
                   <motion.div
                     layout
-                    key={item.id}
+                    key={`ba-item-${item.id}-${idx}`}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}

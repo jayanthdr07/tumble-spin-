@@ -250,7 +250,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
             {/* Items Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <AnimatePresence mode="popLayout">
-                {filteredItems.map(item => {
+                {filteredItems.map((item, idx) => {
                   const effectiveType = getEffectiveServiceType(item);
                   const isDryCleanAvailable = item.dryCleanPrice !== null;
                   const isSteamIronAvailable = item.steamIronPrice !== null;
@@ -259,7 +259,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                   return (
                     <motion.div
                       layout
-                      key={item.id}
+                      key={`estimator-item-${item.id}-${idx}`}
                       initial={{ opacity: 0, scale: 0.97 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}

@@ -241,9 +241,9 @@ export default function FAQ() {
 
         {/* Category Tabs Switcher */}
         <div className="flex flex-wrap items-center justify-center gap-1.5 mb-10 pb-2 border-b border-slate-100 dark:border-slate-800 max-w-4xl mx-auto overflow-x-auto scrollbar-none">
-          {categories.map((cat) => (
+          {categories.map((cat, idx) => (
             <button
-              key={cat.id}
+              key={`faq-cat-${cat.id}-${idx}`}
               onClick={() => {
                 setActiveCategory(cat.id);
                 setOpenId(null); // Close active accordion when changing category

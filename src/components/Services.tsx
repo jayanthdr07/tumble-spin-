@@ -185,7 +185,7 @@ export default function Services({ onSelectService }: ServicesProps) {
                 : 'md:col-span-4';
               return (
                 <div
-                  key={index}
+                  key={`skel-serv-${index}`}
                   className={`${gridColSpan} rounded-2xl border border-slate-100/60 dark:border-brand-teal/5 bg-white/80 dark:bg-brand-deep/10 p-6 space-y-5 animate-pulse`}
                 >
                   {/* Image Thumbnail Placeholder */}
@@ -247,7 +247,7 @@ export default function Services({ onSelectService }: ServicesProps) {
 
               return (
                 <motion.div
-                  key={service.id}
+                  key={`serv-${service.id}-${index}`}
                   initial={{ opacity: 0, y: 15 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: "-40px" }}
@@ -298,8 +298,8 @@ export default function Services({ onSelectService }: ServicesProps) {
 
                     {/* Features Bullet List */}
                     <ul className="space-y-2 pt-2">
-                      {service.features.map((feature) => (
-                        <li key={feature} className="flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                      {service.features.map((feature, fidx) => (
+                        <li key={`feat-${service.id}-${fidx}`} className="flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                           <CheckCircle2 className="h-3.5 w-3.5 text-brand-secondary shrink-0 mt-0.5" />
                           <span>{feature}</span>
                         </li>

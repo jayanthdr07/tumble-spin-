@@ -150,8 +150,8 @@ export default function ServiceQuality({ qualityImage }: ServiceQualityProps) {
 
             {/* Highlight list */}
             <div className="space-y-6 pt-4" id="quality-highlights-list">
-              {qualityPoints.map((point) => (
-                <div key={point.title} className="quality-text-reveal flex items-start gap-4">
+              {qualityPoints.map((point, idx) => (
+                <div key={`qp-${point.title}-${idx}`} className="quality-text-reveal flex items-start gap-4">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
                     {point.icon}
                   </div>

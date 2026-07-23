@@ -184,9 +184,9 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
 
         {/* Pricing Category Filters - Tabs */}
         <div className="flex flex-wrap justify-center gap-2.5 mb-12" id="pricing-category-filters">
-          {PRICING_DATA.map((cat) => (
+          {PRICING_DATA.map((cat, idx) => (
             <button
-              key={cat.id}
+              key={`price-cat-${cat.id}-${idx}`}
               onClick={() => setActiveCategory(cat.id)}
               className={`flex items-center gap-2 px-5 py-3 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300 ${
                 activeCategory === cat.id
