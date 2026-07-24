@@ -14,6 +14,8 @@ import {
   updateDoc, 
   getDocs, 
   collection,
+  query,
+  limit,
   runTransaction
 } from 'firebase/firestore';
 
@@ -84,8 +86,8 @@ const SUB_SERVICES_MAP: Record<string, number> = {
   'bags-leather': 490,
   'bags-backpack': 290,
   'bags-spa-care': 590,
-  'laundry-wash-fold': 99,
-  'laundry-wash-steam-iron': 125,
+  'laundry-wash-fold': 95,
+  'laundry-wash-steam-iron': 129,
 };
 
 // Re-computes the order price on the backend to avoid trusting the client total
@@ -107,27 +109,32 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> {
   });
 }
 
-function calculateBackendTotal(quantities: Record<string, number>, selectedServices: string[], dynamicPricing: any) {
+function calculateBackendTotal(quantities: Record<string, number>, selectedServices: string[], dynamicPricing: any, customPrices?: any) {
   let subservicesTotal = 0;
   for (const [id, qty] of Object.entries(quantities)) {
-    if (qty > 0 && SUB_SERVICES_MAP[id]) {
-      let price = SUB_SERVICES_MAP[id];
-      if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage) {
-        if (dynamicPricing.mode === 'surcharge') {
-          price = Math.round(price + (price * dynamicPricing.percentage) / 100);
-        } else if (dynamicPricing.mode === 'discount') {
-          price = Math.round(price - (price * dynamicPricing.percentage) / 100);
-        }
-      }
-      subservicesTotal += price * qty;
+    if (qty > 0) {
+      const customOverride = customPrices?.booking?.[id] || customPrices?.services?.[id];
+      const defaultPrice = SUB_SERVICES_MAP[id] || 0;
+      const price = (customOverride !== undefined && customOverride !== null && customOverride !== '')
+        ? Number(customOverride)
+        : defaultPrice;
+
+      subservicesTotal += price * (qty as number);
     }
   }
-  const expressSurcharge = selectedServices.includes('express') ? 499 : 0;
-  const baseTotal = subservicesTotal + expressSurcharge;
-  if (baseTotal === 0 && (selectedServices.includes('wash-fold') || selectedServices.includes('hassle-free'))) {
+
+  const customExpress = customPrices?.services?.['express'];
+  const expressPrice = (customExpress !== undefined && customExpress !== null && customExpress !== '')
+    ? Number(customExpress)
+    : 499;
+
+  const expressSurcharge = selectedServices && selectedServices.includes('express') ? expressPrice : 0;
+  const rawBaseTotal = subservicesTotal + expressSurcharge;
+
+  if (rawBaseTotal === 0 && selectedServices && selectedServices.length > 0) {
     return 99; // Standard Slot Booking Reservation Fee
   }
-  return baseTotal;
+  return rawBaseTotal;
 }
 
 // Generates a sequential order ID from Firestore concurrently using an atomic transaction to avoid race conditions
@@ -450,7 +457,7 @@ async function sendBookingEmail(orderData: any) {
       usedMethod = 'Resend';
       const emailPromises = [];
 
-      // Send to targetRecipients
+      // Send to Admin recipient
       emailPromises.push(
         fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -461,16 +468,41 @@ async function sendBookingEmail(orderData: any) {
           body: JSON.stringify({
             from: resendFrom,
             reply_to: hasRealUserEmail ? userEmail : undefined,
-            to: targetRecipients,
+            to: [recipientEmail],
             subject: subject,
             html: htmlContent
           })
         }).then(async (r) => {
           const data = await r.json();
-          console.log('[Email Service] Primary email sent via Resend:', data);
-          info = data;
+          console.log('[Email Service] Admin email sent via Resend API:', data);
+          if (!info) info = data;
         })
       );
+
+      // Send to Customer recipient if user email is present
+      if (hasRealUserEmail && userEmail.toLowerCase() !== recipientEmail.toLowerCase()) {
+        emailPromises.push(
+          fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${resendApiKey}`
+            },
+            body: JSON.stringify({
+              from: resendFrom,
+              reply_to: recipientEmail,
+              to: [userEmail],
+              subject: subject,
+              html: htmlContent
+            })
+          }).then(async (r) => {
+            const data = await r.json();
+            console.log('[Email Service] Customer confirmation email sent via Resend API:', data);
+          }).catch(err => {
+            console.warn('[Email Service] Customer Resend email dispatch warning:', err);
+          })
+        );
+      }
 
       await Promise.all(emailPromises);
     } catch (resendErr) {
@@ -619,20 +651,31 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
   // Cashfree Initiate Payment Endpoint for Laundry Booking Orders
   const handleInitiateCashfreePayment = async (req: express.Request, res: express.Response) => {
     try {
-      const { bookingDetails, selectedServices, quantities, dynamicPricing } = req.body;
+      const { bookingDetails, selectedServices, quantities, dynamicPricing, customPrices } = req.body;
 
       if (!bookingDetails || !selectedServices || !quantities) {
         return res.status(400).json({ error: 'Missing required order details' });
       }
 
-      // Secure backend price calculation
-      const calculatedTotal = calculateBackendTotal(quantities, selectedServices, dynamicPricing);
-      if (calculatedTotal <= 0) {
+      // Secure backend price calculation (raw base total)
+      const rawBaseTotal = calculateBackendTotal(quantities, selectedServices, dynamicPricing, customPrices);
+      if (rawBaseTotal <= 0) {
         return res.status(400).json({ error: 'Invalid order amount calculated' });
       }
 
+      // Dynamic pricing adjustment (Surge or Promo)
+      let totalAfterDynamic = rawBaseTotal;
+      if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage && rawBaseTotal > 0) {
+        const adj = Math.round((rawBaseTotal * dynamicPricing.percentage) / 100);
+        if (dynamicPricing.mode === 'surcharge') {
+          totalAfterDynamic = rawBaseTotal + adj;
+        } else if (dynamicPricing.mode === 'discount') {
+          totalAfterDynamic = Math.max(0, rawBaseTotal - adj);
+        }
+      }
+
       // Check if user has an active membership for discount (SMART gets 10%, SILVER gets 20%)
-      let finalTotal = calculatedTotal;
+      let finalTotal = totalAfterDynamic;
       let membershipApplied = false;
       const cleanPhone = (bookingDetails.phone || '').replace(/\D/g, '');
       
@@ -643,9 +686,9 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
             const memberData = memberDoc.data();
             if (memberData && memberData.status === 'active' && (memberData.packageType === 'SMART' || memberData.packageType === 'SILVER')) {
               const discountPercentage = memberData.packageType === 'SMART' ? 10 : 20;
-              finalTotal = Math.round(calculatedTotal - (calculatedTotal * discountPercentage) / 100);
+              finalTotal = Math.round(totalAfterDynamic - (totalAfterDynamic * discountPercentage) / 100);
               membershipApplied = true;
-              console.log(`[Cashfree Backend] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Original: ${calculatedTotal}, Final: ${finalTotal}`);
+              console.log(`[Cashfree Backend] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Raw: ${rawBaseTotal}, After Dynamic: ${totalAfterDynamic}, Final: ${finalTotal}`);
             }
           }
         } catch (dbErr) {
@@ -655,7 +698,7 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
 
       if (!membershipApplied) {
         // Flat 5% self-booking discount for direct online payments if no active membership
-        finalTotal = Math.round(calculatedTotal - (calculatedTotal * 5) / 100);
+        finalTotal = Math.round(totalAfterDynamic - (totalAfterDynamic * 5) / 100);
       }
 
       // Generate secure sequential order display ID
@@ -699,7 +742,11 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         subServices: Object.entries(quantities)
           .filter(([_, qty]) => (qty as number) > 0)
           .map(([id, qty]) => {
-            let price = SUB_SERVICES_MAP[id] || 0;
+            const customOverride = customPrices?.booking?.[id] || customPrices?.services?.[id];
+            let price = (customOverride !== undefined && customOverride !== null && customOverride !== '')
+              ? Number(customOverride)
+              : (SUB_SERVICES_MAP[id] || 0);
+
             if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage) {
               if (dynamicPricing.mode === 'surcharge') {
                 price = Math.round(price + (price * dynamicPricing.percentage) / 100);
@@ -1605,6 +1652,108 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
     } catch (err: any) {
       console.error('Error in admin test-email endpoint:', err);
       res.status(500).json({ error: err.message || 'Failed to dispatch test email' });
+    }
+  });
+
+  // Admin Webhook Logs & Debugging Endpoint
+  app.get('/api/admin/webhooks', async (req, res) => {
+    try {
+      const webhooksCol = collection(db, 'webhook_events');
+      const snapshot = await getDocs(query(webhooksCol, limit(100)));
+      let logs = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...(docSnap.data() as any) }));
+
+      // Also fetch payments ledger as fallback/supplement
+      const paymentsCol = collection(db, 'payments');
+      const paySnap = await getDocs(query(paymentsCol, limit(100)));
+      const paymentLogs = paySnap.docs.map(docSnap => {
+        const d: any = docSnap.data() || {};
+        return {
+          id: `pay_${docSnap.id}`,
+          eventId: d.transactionId ? `evt_${d.transactionId}` : `evt_pay_${docSnap.id}`,
+          merchantTransactionId: d.merchantTransactionId || d.orderId || docSnap.id,
+          cfPaymentId: d.transactionId || docSnap.id,
+          paymentStatus: d.status || 'SUCCESS',
+          receivedAmount: d.amount || 0,
+          payload: d.payload || {
+            source: 'Payment Ledger',
+            verificationSource: d.verificationSource || 'webhook',
+            orderId: d.orderId,
+            paidAt: d.paidAt
+          },
+          gateway: d.gateway || 'cashfree',
+          processedAt: d.paidAt || d.createdAt || new Date().toISOString()
+        };
+      });
+
+      // Deduplicate by eventId or cfPaymentId
+      const existingIds = new Set(logs.map((l: any) => l.cfPaymentId || l.eventId));
+      for (const pLog of paymentLogs) {
+        if (!existingIds.has(pLog.cfPaymentId) && !existingIds.has(pLog.eventId)) {
+          logs.push(pLog);
+        }
+      }
+
+      // Sort descending by processedAt
+      logs.sort((a: any, b: any) => new Date(b.processedAt || 0).getTime() - new Date(a.processedAt || 0).getTime());
+
+      res.json({ success: true, count: logs.length, logs });
+    } catch (err: any) {
+      console.error('Error fetching admin webhook logs:', err);
+      res.status(500).json({ error: err.message || 'Failed to fetch webhook logs' });
+    }
+  });
+
+  // Admin Webhook Simulator / Test Trigger for manual debugging
+  app.post('/api/admin/test-webhook', async (req, res) => {
+    try {
+      const testOrderId = req.body.orderId || `TEST_ORD_${Date.now()}`;
+      const testPaymentId = `CF_TEST_${Math.floor(100000 + Math.random() * 900000)}`;
+      const testAmount = req.body.amount || 430;
+      const testStatus = req.body.status || 'SUCCESS';
+
+      const mockPayload = {
+        type: 'PAYMENT_SUCCESS_WEBHOOK',
+        event_time: new Date().toISOString(),
+        data: {
+          order: {
+            order_id: testOrderId,
+            order_amount: testAmount,
+            order_currency: 'INR'
+          },
+          payment: {
+            cf_payment_id: testPaymentId,
+            payment_status: testStatus,
+            payment_amount: testAmount,
+            payment_currency: 'INR',
+            payment_completion_time: new Date().toISOString(),
+            payment_message: 'Mock verification signal via Admin Debugger'
+          }
+        }
+      };
+
+      const eventId = `evt_cf_${testPaymentId}`;
+      const eventRef = doc(db, 'webhook_events', eventId);
+      await setDoc(eventRef, {
+        eventId,
+        merchantTransactionId: testOrderId,
+        cfPaymentId: testPaymentId,
+        paymentStatus: testStatus,
+        receivedAmount: testAmount,
+        payload: mockPayload,
+        gateway: 'cashfree_test',
+        processedAt: new Date().toISOString()
+      });
+
+      res.json({
+        success: true,
+        message: 'Mock test webhook event generated & stored successfully',
+        eventId,
+        cfPaymentId: testPaymentId,
+        merchantTransactionId: testOrderId
+      });
+    } catch (err: any) {
+      console.error('Error creating test webhook event:', err);
+      res.status(500).json({ error: err.message || 'Failed to generate test webhook event' });
     }
   });
 

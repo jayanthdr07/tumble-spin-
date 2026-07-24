@@ -6,7 +6,7 @@ import {
   ChevronDown, MessageSquare, ShoppingBag, Plus, Trash2, ListOrdered, Bell,
   Search, Settings, Store, Receipt, Download, ShoppingCart, Info, Minus,
   Printer, Package, Users, TrendingUp, Sun, Moon,
-  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle
+  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
@@ -124,7 +124,7 @@ export default function AdminPanel({
   const [errorMsg, setErrorMsg] = useState('');
   const [orders, setOrders] = useState<OrderData[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderData | null>(null);
-  const [activeTab, setActiveTab] = useState<'bookings' | 'promo' | 'pricing' | 'profile' | 'business' | 'offline' | 'customers' | 'analytics' | 'deleted_orders'>('bookings');
+  const [activeTab, setActiveTab] = useState<'bookings' | 'promo' | 'pricing' | 'profile' | 'business' | 'offline' | 'customers' | 'analytics' | 'deleted_orders' | 'webhooks'>('bookings');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
 
@@ -221,6 +221,56 @@ export default function AdminPanel({
   const [emailSettingsMsg, setEmailSettingsMsg] = useState<{ type: string; text: string }>({ type: '', text: '' });
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<any>(null);
+
+  // Webhook Logs & Payload Debugger state
+  const [webhookLogs, setWebhookLogs] = useState<any[]>([]);
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [webhookFilterQuery, setWebhookFilterQuery] = useState('');
+  const [selectedPayloadLog, setSelectedPayloadLog] = useState<any | null>(null);
+  const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
+  const [simulatingWebhook, setSimulatingWebhook] = useState(false);
+
+  const fetchWebhookLogs = async () => {
+    try {
+      setWebhookLoading(true);
+      const res = await fetch('/api/admin/webhooks');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.logs)) {
+          setWebhookLogs(data.logs);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch webhook logs:', e);
+    } finally {
+      setWebhookLoading(false);
+    }
+  };
+
+  const handleSimulateWebhook = async () => {
+    try {
+      setSimulatingWebhook(true);
+      const res = await fetch('/api/admin/test-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: 660, status: 'SUCCESS' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchWebhookLogs();
+      }
+    } catch (e) {
+      console.error('Error triggering simulated webhook:', e);
+    } finally {
+      setSimulatingWebhook(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'webhooks') {
+      fetchWebhookLogs();
+    }
+  }, [activeTab]);
 
   const fetchEmailSettings = async () => {
     try {
@@ -1707,6 +1757,18 @@ export default function AdminPanel({
                       Deleted Orders Log
                     </button>
                   )}
+
+                  <button
+                    onClick={() => setActiveTab('webhooks')}
+                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all duration-300 flex items-center gap-2 shrink-0 cursor-pointer ${
+                      activeTab === 'webhooks'
+                        ? 'bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-brand-teal/5 bg-white dark:bg-brand-dark/40 border border-slate-200/40 dark:border-brand-teal/5'
+                    }`}
+                  >
+                    <Server className="h-3.5 w-3.5" />
+                    Webhook & Debug Logs
+                  </button>
 
                   {/* Log Out button */}
                   <button
@@ -4663,6 +4725,165 @@ export default function AdminPanel({
                     )}
                   </div>
                 )}
+
+                {activeTab === 'webhooks' && (
+                  <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 dark:border-brand-teal/5 pb-5">
+                      <div className="space-y-1">
+                        <h4 className="text-md font-extrabold text-slate-800 dark:text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                          <Server className="h-4 w-4 text-brand-primary dark:text-brand-accent" />
+                          ⚡ Payment Gateway Webhooks & Live Payload Debugger
+                        </h4>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          Inspect recent real-time gateway webhooks, raw JSON payloads, transaction IDs, amounts, and statuses to manually verify or debug payment issues.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleSimulateWebhook}
+                          disabled={simulatingWebhook}
+                          className="px-4 py-2 rounded-xl text-xs font-bold text-brand-primary bg-brand-primary/10 hover:bg-brand-primary/20 dark:text-brand-accent dark:bg-brand-accent/10 dark:hover:bg-brand-accent/20 border border-brand-primary/20 dark:border-brand-accent/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          {simulatingWebhook ? 'Generating Mock...' : 'Simulate Webhook Event'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={fetchWebhookLogs}
+                          disabled={webhookLoading}
+                          className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-brand-deep/50 dark:hover:bg-brand-deep dark:text-slate-200 border border-slate-200 dark:border-brand-teal/15 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${webhookLoading ? 'animate-spin' : ''}`} />
+                          Refresh Logs
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Metric Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="p-4 rounded-2xl bg-white dark:bg-brand-deep/20 border border-slate-100 dark:border-brand-teal/5 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Total Logged Webhooks</span>
+                        <div className="text-xl font-black text-slate-800 dark:text-white font-mono">{webhookLogs.length}</div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-800/20 space-y-1">
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-mono">Verified Success Events</span>
+                        <div className="text-xl font-black text-emerald-700 dark:text-emerald-300 font-mono">
+                          {webhookLogs.filter(l => (l.paymentStatus || '').toUpperCase() === 'SUCCESS' || (l.paymentStatus || '').toLowerCase() === 'paid').length}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-800/20 space-y-1">
+                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider font-mono">Pending / Non-Success Signals</span>
+                        <div className="text-xl font-black text-amber-700 dark:text-amber-300 font-mono">
+                          {webhookLogs.filter(l => (l.paymentStatus || '').toUpperCase() !== 'SUCCESS' && (l.paymentStatus || '').toLowerCase() !== 'paid').length}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Filter & Search Bar */}
+                    <div className="relative">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <input
+                        type="text"
+                        value={webhookFilterQuery}
+                        onChange={(e) => setWebhookFilterQuery(e.target.value)}
+                        placeholder="Search webhooks by Order ID, Cashfree Payment ID, Status, or Gateway..."
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/50 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                      />
+                    </div>
+
+                    {/* Display Table */}
+                    {(() => {
+                      const filteredLogs = webhookLogs.filter(log => {
+                        if (!webhookFilterQuery.trim()) return true;
+                        const q = webhookFilterQuery.toLowerCase();
+                        return (
+                          (log.merchantTransactionId || '').toLowerCase().includes(q) ||
+                          (log.cfPaymentId || '').toLowerCase().includes(q) ||
+                          (log.paymentStatus || '').toLowerCase().includes(q) ||
+                          (log.gateway || '').toLowerCase().includes(q) ||
+                          (log.eventId || '').toLowerCase().includes(q)
+                        );
+                      });
+
+                      if (filteredLogs.length === 0) {
+                        return (
+                          <div className="text-center py-16 bg-slate-50/50 dark:bg-brand-deep/10 border border-dashed border-slate-200 dark:border-brand-teal/15 rounded-3xl space-y-2">
+                            <Server className="h-10 w-10 text-slate-300 dark:text-slate-700 mx-auto" />
+                            <h5 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider font-mono">No Webhook Logs Found</h5>
+                            <p className="text-xs text-slate-400 max-w-md mx-auto">
+                              Incoming Cashfree or gateway webhook events will appear here in real-time along with their raw JSON payloads for manual debugging.
+                            </p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="bg-white dark:bg-brand-deep/20 rounded-2xl border border-slate-200/80 dark:border-brand-teal/10 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 dark:bg-brand-deep/50 border-b border-slate-200/80 dark:border-brand-teal/10 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 font-mono">
+                                <tr>
+                                  <th className="px-4 py-3">Processed At</th>
+                                  <th className="px-4 py-3">Order / Txn ID</th>
+                                  <th className="px-4 py-3">Gateway Payment ID</th>
+                                  <th className="px-4 py-3">Status</th>
+                                  <th className="px-4 py-3">Amount</th>
+                                  <th className="px-4 py-3 text-right">Raw Payload</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-brand-teal/5 font-mono">
+                                {filteredLogs.map((log, idx) => {
+                                  const isSuccess = (log.paymentStatus || '').toUpperCase() === 'SUCCESS' || (log.paymentStatus || '').toLowerCase() === 'paid';
+                                  const formattedDate = log.processedAt ? new Date(log.processedAt).toLocaleString('en-IN', {
+                                    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+                                  }) : 'N/A';
+
+                                  return (
+                                    <tr key={`wh-log-${log.id || log.eventId || idx}-${idx}`} className="hover:bg-slate-50/60 dark:hover:bg-brand-deep/40 transition-colors">
+                                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap text-[11px]">
+                                        {formattedDate}
+                                      </td>
+                                      <td className="px-4 py-3 font-bold text-slate-800 dark:text-white whitespace-nowrap">
+                                        #{log.merchantTransactionId || log.id}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap text-[11px]">
+                                        {log.cfPaymentId || 'N/A'}
+                                      </td>
+                                      <td className="px-4 py-3 whitespace-nowrap">
+                                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                          isSuccess
+                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40'
+                                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40'
+                                        }`}>
+                                          {isSuccess ? <Check className="h-3 w-3" /> : <Info className="h-3 w-3" />}
+                                          {log.paymentStatus || 'RECORDED'}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 font-bold text-slate-800 dark:text-white whitespace-nowrap">
+                                        ₹{Number(log.receivedAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedPayloadLog(log)}
+                                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-brand-deep/60 dark:hover:bg-brand-deep text-slate-700 dark:text-slate-200 text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 transition-all cursor-pointer flex items-center gap-1 ml-auto"
+                                        >
+                                          <Eye className="h-3 w-3 text-brand-primary dark:text-brand-accent" />
+                                          Inspect Payload
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </>
             )}
 
@@ -4965,6 +5186,83 @@ export default function AdminPanel({
                 </button>
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* RAW WEBHOOK JSON PAYLOAD INSPECTOR MODAL */}
+      <AnimatePresence>
+        {selectedPayloadLog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-slate-900 rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-800 overflow-hidden flex flex-col max-h-[85vh] text-white"
+            >
+              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                <span className="text-xs font-bold font-mono text-brand-accent flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  RAW WEBHOOK JSON PAYLOAD INSPECTOR
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPayloadLog(null)}
+                  className="p-1 rounded-full text-slate-400 hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-950/60 border-b border-slate-800 text-xs font-mono space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Order / Txn ID:</span>
+                  <span className="font-bold text-white">#{selectedPayloadLog.merchantTransactionId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Cashfree Txn ID:</span>
+                  <span className="font-bold text-white">{selectedPayloadLog.cfPaymentId || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Processed At:</span>
+                  <span className="text-slate-300">{selectedPayloadLog.processedAt}</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 bg-slate-950 font-mono text-xs">
+                <pre className="text-emerald-400 bg-slate-900 p-4 rounded-xl border border-slate-800 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                  {JSON.stringify(selectedPayloadLog.payload || selectedPayloadLog, null, 2)}
+                </pre>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 bg-slate-950 flex justify-between items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(selectedPayloadLog.payload || selectedPayloadLog, null, 2));
+                    setCopiedLogId(selectedPayloadLog.eventId || 'copied');
+                    setTimeout(() => setCopiedLogId(null), 2000);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Copy className="h-3.5 w-3.5 text-brand-accent" />
+                  {copiedLogId ? 'Copied to Clipboard!' : 'Copy Raw JSON'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedPayloadLog(null)}
+                  className="px-5 py-2 rounded-xl bg-brand-accent text-brand-deep text-xs font-bold uppercase transition-all cursor-pointer"
+                >
+                  Close Inspector
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

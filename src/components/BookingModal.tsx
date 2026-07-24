@@ -742,28 +742,50 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     return selectedServices.includes('express') ? adjustPrice(getExpressPriceVal()) : 0;
   };
 
-  const getGrandTotal = () => {
-    const baseTotal = getSubservicesTotal() + getExpressSurcharge();
-    
-    // Check if user has an active membership for discount (SMART gets 10%, SILVER gets 20%)
+  // Raw base total without dynamic pricing adjustments or discounts
+  const getRawBaseTotal = () => {
+    const rawSum = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0)
+      + (selectedServices.includes('express') ? getExpressPriceVal() : 0);
+    if (rawSum === 0 && selectedServices.length > 0) {
+      return 99; // Nominal refundable booking deposit
+    }
+    return rawSum;
+  };
+
+  // Dynamic pricing adjustment (Surge (+) or Promo Discount (-))
+  const getDynamicPricingAdjustment = () => {
+    const rawBase = getRawBaseTotal();
+    if (!dynamicPricing || dynamicPricing.mode === 'none' || !dynamicPricing.percentage || rawBase === 0) {
+      return 0;
+    }
+    const amt = Math.round((rawBase * dynamicPricing.percentage) / 100);
+    return dynamicPricing.mode === 'surcharge' ? amt : -amt;
+  };
+
+  // Base total after surge/promo dynamic pricing applied
+  const getBaseAfterDynamicPricing = () => {
+    return Math.max(0, getRawBaseTotal() + getDynamicPricingAdjustment());
+  };
+
+  // Payment method or active membership discount amount
+  const getPaymentDiscount = () => {
+    const base = getBaseAfterDynamicPricing();
     const activeSub = getActiveMembership();
+
     if (activeSub && (activeSub.packageType === 'SMART' || activeSub.packageType === 'SILVER')) {
       const discountPercentage = activeSub.packageType === 'SMART' ? 10 : 20;
-      const targetBase = baseTotal === 0 && (selectedServices.includes('wash-fold') || selectedServices.includes('hassle-free')) ? 99 : baseTotal;
-      return Math.round(targetBase - (targetBase * discountPercentage) / 100);
+      return Math.round((base * discountPercentage) / 100);
     }
 
-    // Flat 5% self-booking discount for dynamic QR payments (only for non-members)
     if (selectedPaymentMethod === 'upi_qr') {
-      const targetBase = baseTotal === 0 && (selectedServices.includes('wash-fold') || selectedServices.includes('hassle-free')) ? 99 : baseTotal;
-      return Math.round(targetBase - (targetBase * 5) / 100);
+      return Math.round((base * 5) / 100);
     }
 
-    if (baseTotal === 0 && (selectedServices.includes('wash-fold') || selectedServices.includes('hassle-free'))) {
-      return 99; // Nominal adjustable slot booking deposit
-    }
+    return 0;
+  };
 
-    return baseTotal;
+  const getGrandTotal = () => {
+    return Math.max(0, getBaseAfterDynamicPricing() - getPaymentDiscount());
   };
 
   const shouldSkipStep3 = () => {
@@ -1031,7 +1053,8 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
           bookingDetails,
           selectedServices,
           quantities,
-          dynamicPricing
+          dynamicPricing,
+          customPrices
         })
       });
 
@@ -2950,33 +2973,70 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             </span>
                           </div>
                           
-                          {selectedPaymentMethod === 'upi_qr' && (() => {
-                             const baseAmount = getSubservicesTotal() + getExpressSurcharge();
-                             const originalAmt = baseAmount === 0 && (selectedServices.includes('wash-fold') || selectedServices.includes('hassle-free')) ? 99 : baseAmount;
-                             const discountAmt = Math.round((originalAmt * 5) / 100);
-                             return (
-                               <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2 text-[11px] font-medium">
-                                 <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                                   <span>Original amount:</span>
-                                   <span className="font-mono">₹{originalAmt}</span>
-                                 </div>
-                                 <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                                   <span>Self-booking discount (5% off):</span>
-                                   <span className="font-mono">-₹{discountAmt}</span>
-                                 </div>
-                               </div>
-                             );
-                           })()}
+                          {(() => {
+                            const rawSubtotal = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                            const expressSurcharge = selectedServices.includes('express') ? getExpressPriceVal() : 0;
+                            const rawBase = rawSubtotal + expressSurcharge;
+                            const isDeposit = rawBase === 0 && selectedServices.length > 0;
+                            const dynAdj = getDynamicPricingAdjustment();
+                            const discountAmt = getPaymentDiscount();
+                            const activeSub = getActiveMembership();
+
+                            return (
+                              <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-[11px] font-medium">
+                                {rawSubtotal > 0 && (
+                                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                                    <span>Services & Items Subtotal:</span>
+                                    <span className="font-mono">₹{rawSubtotal}</span>
+                                  </div>
+                                )}
+
+                                {expressSurcharge > 0 && (
+                                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                                    <span>Express Priority Option:</span>
+                                    <span className="font-mono">+₹{expressSurcharge}</span>
+                                  </div>
+                                )}
+
+                                {isDeposit && (
+                                  <div className="flex justify-between text-amber-600 dark:text-amber-400 font-semibold">
+                                    <span>Slot Reservation Deposit:</span>
+                                    <span className="font-mono">₹99</span>
+                                  </div>
+                                )}
+
+                                {dynAdj !== 0 && (
+                                  <div className={`flex justify-between ${dynAdj > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                    <span>{dynamicPricing?.label || (dynAdj > 0 ? `Demand Surge (+${dynamicPricing?.percentage}%)` : `Special Discount (-${dynamicPricing?.percentage}%)`)}:</span>
+                                    <span className="font-mono">{dynAdj > 0 ? `+₹${dynAdj}` : `-₹${Math.abs(dynAdj)}`}</span>
+                                  </div>
+                                )}
+
+                                {discountAmt > 0 && (
+                                  <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+                                    <span>
+                                      {activeSub 
+                                        ? `Prepaid ${activeSub.packageType} Discount (${activeSub.packageType === 'SMART' ? 10 : 20}% off):` 
+                                        : 'Online Self-Booking Discount (5% off):'}
+                                    </span>
+                                    <span className="font-mono">-₹{discountAmt}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           <div className="flex justify-between items-center pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 text-sm font-bold">
                             <span className="text-slate-900 dark:text-white">
-                              {shouldSkipStep3() ? 'Refundable Booking Deposit:' : 'Grand Total Projection:'}
+                              {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
+                                ? 'Refundable Booking Deposit:' 
+                                : 'Grand Total Projection:'}
                             </span>
                             <span className="text-lg font-mono text-brand-primary dark:text-brand-accent">
                               ₹{getGrandTotal()}
                             </span>
                           </div>
-                          {shouldSkipStep3() && (
+                          {(shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)) && (
                             <p className="text-[10px] text-right text-slate-500 dark:text-slate-400 font-medium">
                               * 100% credited against your final weighed/sorted invoice
                             </p>
@@ -3010,12 +3070,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             />
                             <div className="space-y-0.5">
                               <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
-                                📱 {shouldSkipStep3() ? 'UPI Booking Deposit (₹99)' : `UPI Dynamic QR Code (₹${getGrandTotal()})`}
+                                📱 {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
+                                  ? `UPI Booking Deposit (₹${getGrandTotal()})` 
+                                  : `UPI Dynamic QR Code (₹${getGrandTotal()})`}
                                 {selectedPaymentMethod === 'upi_qr' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
                               </p>
                               <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
-                                {shouldSkipStep3() ? (
-                                  "Pay a refundable, adjustable deposit of ₹99. This is 100% credited against your final weighed weight bill."
+                                {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0) ? (
+                                  `Pay a refundable, adjustable deposit of ₹${getGrandTotal()} (5% self-booking discount applied). 100% credited against your final weighed bill.`
                                 ) : (
                                   `Secure transaction of ₹${getGrandTotal()} instantly using GPay, PhonePe, Paytm, or BHIM.`
                                 )}
