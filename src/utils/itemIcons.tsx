@@ -1,11 +1,21 @@
 import React from 'react';
 import { 
   Shirt, Pocket, Gem, Crown, Scissors, Wind, Snowflake, 
-  Layers, Bed, Footprints, Briefcase, ShoppingBag
+  Layers, Bed, Footprints, Briefcase, ShoppingBag, CreditCard, Sparkles
 } from 'lucide-react';
 
 export function getItemIcon(identifier: string, className = "h-4 w-4"): React.ReactNode {
   const norm = identifier.toLowerCase().trim();
+
+  // 0. Test / Gateway Service
+  if (
+    norm.includes('test') ||
+    norm.includes('gateway') ||
+    norm.includes('rupee') ||
+    norm.includes('payment')
+  ) {
+    return <CreditCard className={className} />;
+  }
 
   // 1. Footwear
   if (

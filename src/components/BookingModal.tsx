@@ -35,6 +35,7 @@ export interface SubService {
 }
 
 const AVAILABLE_SERVICES = [
+  { id: 'test-gateway-service', name: '⚡ Gateway Test (₹1)', price: '₹1', description: 'Quick ₹1 live payment gateway checkout test.' },
   { id: 'wash-fold', name: 'Wash & Fold', price: '₹95/kg', description: 'Daily wear wash, tumble dry, and expert fold.' },
   { id: 'dry-cleaning', name: 'Dry Cleaning', price: '₹199/item', description: 'Eco-safe solvent cleaning for suits, silk, sarees, and couture.' },
   { id: 'wash-iron', name: 'Wash & Steam Iron', price: '₹129/kg', description: 'Crisp, professionally laundered and steam-pressed garments.' },
@@ -60,6 +61,9 @@ const TIME_SLOT_OPTIONS = [
 ];
 
 export const SUB_SERVICES: SubService[] = [
+  // Gateway Test (₹1)
+  { id: 'test-gateway-1rs', name: '⚡ Gateway Test Item (₹1)', category: 'test', price: 1, serviceType: 'Gateway Test' },
+
   // Men's Wear
   { id: 'men-shirt', name: 'Shirt / T-Shirt', category: 'men', price: 99, serviceType: 'Premium Dry Clean' },
   { id: 'men-trouser', name: 'Trouser / Jeans', category: 'men', price: 99, serviceType: 'Premium Dry Clean' },
@@ -105,6 +109,7 @@ export const SUB_SERVICES: SubService[] = [
 ];
 
 const SUB_CATEGORIES = [
+  { id: 'test', name: '⚡ Test (₹1)' },
   { id: 'men', name: "Men's Wear" },
   { id: 'women', name: "Women's Wear" },
   { id: 'woolens', name: 'Woolens & Coats' },
@@ -744,8 +749,13 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
   // Raw base total without dynamic pricing adjustments or discounts
   const getRawBaseTotal = () => {
-    const rawSum = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0)
+    let rawSum = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0)
       + (selectedServices.includes('express') ? getExpressPriceVal() : 0);
+    
+    if (selectedServices.includes('test-gateway-service') || selectedServices.includes('test-gateway-1rs')) {
+      rawSum = Math.max(1, rawSum);
+    }
+
     if (rawSum === 0 && selectedServices.length > 0) {
       return 99; // Nominal refundable booking deposit
     }

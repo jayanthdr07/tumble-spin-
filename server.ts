@@ -12,6 +12,7 @@ import {
   setDoc, 
   getDoc, 
   updateDoc, 
+  deleteDoc,
   getDocs, 
   collection,
   query,
@@ -59,6 +60,8 @@ const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 
 // Backend pricing map for rigorous order validation (prevents tampering with amount values)
 const SUB_SERVICES_MAP: Record<string, number> = {
+  'test-gateway-1rs': 1,
+  'test-gateway-service': 1,
   'men-shirt': 99,
   'men-trouser': 99,
   'men-suit-3pc': 530,
@@ -132,6 +135,9 @@ function calculateBackendTotal(quantities: Record<string, number>, selectedServi
   const rawBaseTotal = subservicesTotal + expressSurcharge;
 
   if (rawBaseTotal === 0 && selectedServices && selectedServices.length > 0) {
+    if (selectedServices.includes('test-gateway-service') || selectedServices.includes('test-gateway-1rs')) {
+      return 1;
+    }
     return 99; // Standard Slot Booking Reservation Fee
   }
   return rawBaseTotal;
@@ -1655,9 +1661,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
     }
   });
 
-  // Admin Webhook Logs & Debugging Endpoint
+  // Admin Webhook Logs & Debugging Endpoint (Defaults to Real Live Webhooks Only)
   app.get('/api/admin/webhooks', async (req, res) => {
     try {
+      const includeMock = req.query.includeMock === 'true';
       const webhooksCol = collection(db, 'webhook_events');
       const snapshot = await getDocs(query(webhooksCol, limit(100)));
       let logs = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...(docSnap.data() as any) }));
@@ -1693,6 +1700,18 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         }
       }
 
+      // Filter out test/mock data if includeMock is false
+      if (!includeMock) {
+        logs = logs.filter((l: any) => {
+          const mTxn = String(l.merchantTransactionId || '');
+          const pId = String(l.cfPaymentId || '');
+          const isMock = l.gateway === 'cashfree_test' || 
+                         mTxn.startsWith('TEST_ORD_') || 
+                         pId.startsWith('CF_TEST_');
+          return !isMock;
+        });
+      }
+
       // Sort descending by processedAt
       logs.sort((a: any, b: any) => new Date(b.processedAt || 0).getTime() - new Date(a.processedAt || 0).getTime());
 
@@ -1700,6 +1719,34 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
     } catch (err: any) {
       console.error('Error fetching admin webhook logs:', err);
       res.status(500).json({ error: err.message || 'Failed to fetch webhook logs' });
+    }
+  });
+
+  // Admin Endpoint to Purge Mock/Test Webhook Logs
+  app.post('/api/admin/clear-mock-webhooks', async (req, res) => {
+    try {
+      const webhooksCol = collection(db, 'webhook_events');
+      const snapshot = await getDocs(webhooksCol);
+      let deletedCount = 0;
+
+      for (const docSnap of snapshot.docs) {
+        const d: any = docSnap.data() || {};
+        const mTxn = String(d.merchantTransactionId || '');
+        const pId = String(d.cfPaymentId || '');
+        const isMock = d.gateway === 'cashfree_test' || 
+                       mTxn.startsWith('TEST_ORD_') || 
+                       pId.startsWith('CF_TEST_');
+
+        if (isMock) {
+          await deleteDoc(doc(db, 'webhook_events', docSnap.id));
+          deletedCount++;
+        }
+      }
+
+      res.json({ success: true, deletedCount, message: `Purged ${deletedCount} mock/test webhook logs.` });
+    } catch (err: any) {
+      console.error('Error purging mock webhooks:', err);
+      res.status(500).json({ error: err.message || 'Failed to purge mock webhooks' });
     }
   });
 
