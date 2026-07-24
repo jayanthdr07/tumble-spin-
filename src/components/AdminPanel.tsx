@@ -5,7 +5,8 @@ import {
   Phone, User, Calendar, RefreshCw, X, ShieldAlert, Check, 
   ChevronDown, MessageSquare, ShoppingBag, Plus, Trash2, ListOrdered, Bell,
   Search, Settings, Store, Receipt, Download, ShoppingCart, Info, Minus,
-  Printer, Package, Users, TrendingUp, Sun, Moon
+  Printer, Package, Users, TrendingUp, Sun, Moon,
+  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
@@ -205,6 +206,103 @@ export default function AdminPanel({
   const [editBusinessAddress, setEditBusinessAddress] = useState(initialBusiness.address);
   const [editBusinessRazorpayUrl, setEditBusinessRazorpayUrl] = useState(initialBusiness.razorpayUrl || 'https://razorpay.me/@tumblespin');
   const [businessSuccessMsg, setBusinessSuccessMsg] = useState('');
+
+  // Email Gateway Settings state (Admin mail notification on any host)
+  const [adminNotifyEmail, setAdminNotifyEmail] = useState('tumblespin26@gmail.com');
+  const [emailSmtpHost, setEmailSmtpHost] = useState('smtp.gmail.com');
+  const [emailSmtpPort, setEmailSmtpPort] = useState('465');
+  const [emailSmtpUser, setEmailSmtpUser] = useState('');
+  const [emailSmtpPass, setEmailSmtpPass] = useState('');
+  const [emailSmtpFrom, setEmailSmtpFrom] = useState('Tumble Spin Premium');
+  const [emailResendApiKey, setEmailResendApiKey] = useState('');
+  const [hasStoredSmtpPass, setHasStoredSmtpPass] = useState(false);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [emailSettingsLoading, setEmailSettingsLoading] = useState(false);
+  const [emailSettingsMsg, setEmailSettingsMsg] = useState<{ type: string; text: string }>({ type: '', text: '' });
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<any>(null);
+
+  const fetchEmailSettings = async () => {
+    try {
+      setEmailSettingsLoading(true);
+      const res = await fetch('/api/admin/email-settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (data.adminEmail) setAdminNotifyEmail(data.adminEmail);
+          if (data.smtpHost) setEmailSmtpHost(data.smtpHost);
+          if (data.smtpPort) setEmailSmtpPort(String(data.smtpPort));
+          if (data.smtpUser) setEmailSmtpUser(data.smtpUser);
+          if (data.smtpFrom) setEmailSmtpFrom(data.smtpFrom);
+          if (data.resendApiKey) setEmailResendApiKey(data.resendApiKey);
+          setHasStoredSmtpPass(data.hasSmtpPass);
+          if (data.hasSmtpPass) {
+            setEmailSmtpPass('***KEEP_EXISTING***');
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch email settings:', e);
+    } finally {
+      setEmailSettingsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'business') {
+      fetchEmailSettings();
+    }
+  }, [activeTab]);
+
+  const handleSaveEmailSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailSettingsMsg({ type: '', text: '' });
+    try {
+      setEmailSettingsLoading(true);
+      const res = await fetch('/api/admin/email-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminEmail: adminNotifyEmail,
+          smtpHost: emailSmtpHost,
+          smtpPort: emailSmtpPort,
+          smtpUser: emailSmtpUser,
+          smtpPass: emailSmtpPass,
+          smtpFrom: emailSmtpFrom,
+          resendApiKey: emailResendApiKey
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEmailSettingsMsg({ type: 'success', text: '🎉 Admin email gateway details saved & synced to Firestore successfully!' });
+        fetchEmailSettings();
+      } else {
+        setEmailSettingsMsg({ type: 'error', text: data.error || 'Failed to save email settings' });
+      }
+    } catch (e: any) {
+      setEmailSettingsMsg({ type: 'error', text: e?.message || 'Network error saving email settings' });
+    } finally {
+      setEmailSettingsLoading(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    setTestEmailResult(null);
+    setTestEmailLoading(true);
+    try {
+      const res = await fetch('/api/admin/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testEmail: adminNotifyEmail })
+      });
+      const data = await res.json();
+      setTestEmailResult(data);
+    } catch (e: any) {
+      setTestEmailResult({ success: false, error: e?.message || 'Network error sending test email' });
+    } finally {
+      setTestEmailLoading(false);
+    }
+  };
 
   // Offline counter billing state
   const [offlineCustomerName, setOfflineCustomerName] = useState('');
@@ -1950,7 +2048,7 @@ export default function AdminPanel({
                             const isSelected = selectedOrder?.orderId === o.orderId;
                             return (
                               <div
-                                key={`${o.orderId}-${idx}`}
+                                key={`admin-ord-${o.orderId || idx}-${idx}`}
                                 onClick={() => handleSelectOrder(o)}
                                 className={`p-4 rounded-2xl border cursor-pointer transition-all ${
                                   isSelected
@@ -2135,7 +2233,7 @@ export default function AdminPanel({
                             <div className="divide-y divide-slate-200/60 dark:divide-brand-teal/5 space-y-2">
                               {selectedOrder.subServices && selectedOrder.subServices.length > 0 ? (
                                 selectedOrder.subServices.map((sub, sidx) => (
-                                  <div key={`${sub.id || sub.name}-${sidx}`} className="flex justify-between items-center text-xs py-2">
+                                  <div key={`admin-sub-${selectedOrder.orderId || 'ord'}-${sub.id || sub.name || sidx}-${sidx}`} className="flex justify-between items-center text-xs py-2">
                                     <div className="space-y-0.5">
                                       <p className="font-semibold text-slate-800 dark:text-white">{sub.name}</p>
                                       <p className="text-[10px] text-slate-400">{sub.serviceType} Care</p>
@@ -2182,7 +2280,7 @@ export default function AdminPanel({
                               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                                 {notificationLogs.filter(l => l.orderId === selectedOrder.orderId).length > 0 ? (
                                   notificationLogs.filter(l => l.orderId === selectedOrder.orderId).map((log, idx) => (
-                                    <div key={`${log.id || 'notif'}-${idx}`} className="p-2.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-white dark:bg-brand-deep/30 flex items-start justify-between text-[11px] leading-normal gap-2">
+                                    <div key={`admin-log-${log.id || log.orderId || idx}-${idx}`} className="p-2.5 rounded-xl border border-slate-100 dark:border-brand-teal/5 bg-white dark:bg-brand-deep/30 flex items-start justify-between text-[11px] leading-normal gap-2">
                                       <div className="space-y-1">
                                         <div className="flex items-center gap-1.5">
                                           <span className={`px-1.5 py-0.5 rounded-sm font-extrabold text-[8px] uppercase tracking-wider ${
@@ -3294,6 +3392,220 @@ export default function AdminPanel({
                           </button>
                         </div>
                       </form>
+
+                      {/* Admin Email Notification Gateway Card */}
+                      <div className="space-y-1 pt-6 border-t border-slate-200/60 dark:border-brand-teal/10">
+                        <h4 className="text-sm font-extrabold text-slate-800 dark:text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                          <Mail className="h-4 w-4 text-brand-primary dark:text-brand-accent" />
+                          📧 Admin Email Notification Gateway (Universal Host Setup)
+                        </h4>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          Ensure admin instant booking emails are delivered to your inbox regardless of where the website is hosted (Vercel, Render, Cloud Run, VPS, Hostinger, AWS, cPanel).
+                        </p>
+                      </div>
+
+                      <form onSubmit={handleSaveEmailSettings} className="bg-white dark:bg-brand-deep/20 rounded-2xl p-5 md:p-6 border border-slate-100 dark:border-brand-teal/5 space-y-5" id="email-settings-form">
+                        
+                        {emailSettingsMsg.text && (
+                          <div className={`p-4 rounded-xl text-xs font-bold border ${
+                            emailSettingsMsg.type === 'success' 
+                              ? 'bg-green-50 text-green-700 border-green-100 dark:bg-green-900/15 dark:text-brand-accent'
+                              : 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/15 dark:text-red-300'
+                          }`}>
+                            {emailSettingsMsg.text}
+                          </div>
+                        )}
+
+                        {/* Admin Notification Recipient Email */}
+                        <div className="space-y-1.5">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Bell className="h-3 w-3 text-brand-primary dark:text-brand-accent" />
+                            Admin Notification Recipient Email
+                          </label>
+                          <input
+                            type="email"
+                            value={adminNotifyEmail}
+                            onChange={(e) => setAdminNotifyEmail(e.target.value)}
+                            placeholder="e.g. tumblespin26@gmail.com"
+                            required
+                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/50 dark:text-white focus:outline-hidden focus:border-brand-primary font-mono"
+                          />
+                          <p className="text-[10px] text-slate-400">
+                            All new customer order confirmations and booking alerts will be dispatched directly to this admin email address.
+                          </p>
+                        </div>
+
+                        {/* SMTP Server Configuration */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-brand-deep/40 border border-slate-200/60 dark:border-brand-teal/10 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                              <Server className="h-3.5 w-3.5 text-brand-primary dark:text-brand-accent" />
+                              SMTP Email Credentials (e.g., Gmail App Password)
+                            </span>
+                            <span className="text-[10px] bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent px-2 py-0.5 rounded-full font-extrabold uppercase font-mono">
+                              Recommended
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                            <div className="sm:col-span-8 space-y-1">
+                              <label className="block text-[9px] font-bold text-slate-400 uppercase">SMTP Host</label>
+                              <input
+                                type="text"
+                                value={emailSmtpHost}
+                                onChange={(e) => setEmailSmtpHost(e.target.value)}
+                                placeholder="smtp.gmail.com"
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white"
+                              />
+                            </div>
+                            <div className="sm:col-span-4 space-y-1">
+                              <label className="block text-[9px] font-bold text-slate-400 uppercase">SMTP Port</label>
+                              <select
+                                value={emailSmtpPort}
+                                onChange={(e) => setEmailSmtpPort(e.target.value)}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white"
+                              >
+                                <option value="465">465 (SSL / Gmail)</option>
+                                <option value="587">587 (TLS / Standard)</option>
+                                <option value="25">25 (Plain)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-slate-400 uppercase">SMTP Username / Email</label>
+                              <input
+                                type="email"
+                                value={emailSmtpUser}
+                                onChange={(e) => setEmailSmtpUser(e.target.value)}
+                                placeholder="tumblespin26@gmail.com"
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-slate-400 uppercase flex items-center justify-between">
+                                <span>SMTP Password / App Password</span>
+                                {hasStoredSmtpPass && (
+                                  <span className="text-[9px] text-green-600 dark:text-brand-accent font-bold">Saved in DB</span>
+                                )}
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type={showSmtpPass ? 'text' : 'password'}
+                                  value={emailSmtpPass}
+                                  onChange={(e) => setEmailSmtpPass(e.target.value)}
+                                  placeholder="e.g. 16-digit Google App Password"
+                                  className="w-full rounded-lg border border-slate-200 bg-white pl-3 pr-8 py-2 text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSmtpPass(!showSmtpPass)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                                >
+                                  {showSmtpPass ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-slate-400 uppercase">Sender Display Name</label>
+                            <input
+                              type="text"
+                              value={emailSmtpFrom}
+                              onChange={(e) => setEmailSmtpFrom(e.target.value)}
+                              placeholder="Tumble Spin Premium"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Optional Resend API Key alternative */}
+                        <div className="p-4 rounded-2xl bg-slate-50/40 dark:bg-brand-deep/20 border border-slate-200/50 dark:border-brand-teal/10 space-y-2">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Key className="h-3 w-3 text-brand-primary dark:text-brand-accent" />
+                            Alternative: Resend API Key (Optional)
+                          </label>
+                          <input
+                            type="password"
+                            value={emailResendApiKey}
+                            onChange={(e) => setEmailResendApiKey(e.target.value)}
+                            placeholder="e.g. re_123456789..."
+                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-mono text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/50 dark:text-white"
+                          />
+                        </div>
+
+                        {/* Gmail App Password Setup Guide */}
+                        <div className="p-4 rounded-xl bg-blue-50/60 text-blue-900 border border-blue-100 dark:bg-blue-950/30 dark:text-blue-200 dark:border-blue-900/30 text-[11px] leading-relaxed space-y-1.5">
+                          <p className="font-bold flex items-center gap-1.5">
+                            <HelpCircle className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                            💡 How to setup Gmail App Password for 100% Guaranteed Inbox Delivery Anywhere:
+                          </p>
+                          <ol className="list-decimal list-inside space-y-0.5 text-[10.5px] opacity-90 pl-1">
+                            <li>Go to your Google Account (<span className="font-mono font-bold">myaccount.google.com</span>) &rarr; Security.</li>
+                            <li>Ensure <span className="font-bold">2-Step Verification</span> is turned ON.</li>
+                            <li>Search for <span className="font-bold">&quot;App Passwords&quot;</span> in Google Account search, generate a 16-character password, and paste it in the <span className="font-bold">SMTP Password</span> box above.</li>
+                          </ol>
+                        </div>
+
+                        {/* Actions & Test Email Buttons */}
+                        <div className="pt-2 border-t border-slate-100 dark:border-brand-teal/5 flex flex-wrap items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={handleSendTestEmail}
+                            disabled={testEmailLoading}
+                            className="px-4 py-2.5 rounded-full border border-brand-primary text-brand-primary hover:bg-brand-primary/5 dark:border-brand-accent dark:text-brand-accent dark:hover:bg-brand-accent/10 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 transition-all"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                            {testEmailLoading ? 'Dispatching Test Email...' : 'Send Test Admin Email'}
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={emailSettingsLoading}
+                            className="px-6 py-2.5 rounded-full bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-bold uppercase tracking-wider shadow-md hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 transition-all"
+                          >
+                            {emailSettingsLoading ? 'Saving Settings...' : 'Save Email Gateway Settings'}
+                          </button>
+                        </div>
+
+                        {/* Test Email Result Banner */}
+                        {testEmailResult && (
+                          <div className={`p-4 rounded-xl text-xs font-mono border ${
+                            testEmailResult.success 
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40'
+                              : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/40'
+                          }`}>
+                            <div className="font-bold flex items-center gap-1.5 mb-1 text-sm font-sans">
+                              {testEmailResult.success ? (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                  Test Admin Notification Dispatched Successfully!
+                                </>
+                              ) : (
+                                <>
+                                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                                  Test Notification Failed / Sandbox Warning
+                                </>
+                              )}
+                            </div>
+                            <p className="text-[11px] mb-1">Method Used: <span className="font-bold uppercase text-brand-primary dark:text-brand-accent">{testEmailResult.method || 'Unknown'}</span></p>
+                            <p className="text-[11px] mb-1">Target Admin Email: <span className="font-bold">{testEmailResult.recipientEmail || adminNotifyEmail}</span></p>
+                            {testEmailResult.etherealUrl && (
+                              <p className="text-[11px] mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-800/50">
+                                ℹ️ <span className="font-bold">Ethereal Preview Link:</span> <a href={testEmailResult.etherealUrl} target="_blank" rel="noreferrer" className="underline text-blue-600 dark:text-blue-400 break-all">{testEmailResult.etherealUrl}</a> (Note: Configure SMTP/Gmail App Pass above to receive real inbox emails).
+                              </p>
+                            )}
+                            {testEmailResult.error && (
+                              <p className="text-[11px] text-red-600 dark:text-red-400 font-bold mt-1">
+                                Error: {testEmailResult.error}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                      </form>
                     </div>
                   </div>
                 )}
@@ -3934,7 +4246,7 @@ export default function AdminPanel({
                                 <div className="space-y-3">
                                   {selectedCustomer.offlineOrders.map((order, idx) => (
                                     <div 
-                                      key={`${order.orderId}-${idx}`}
+                                      key={`cust-ord-${order.orderId || idx}-${idx}`}
                                       className="p-4 bg-white dark:bg-brand-deep/20 border border-slate-200/50 dark:border-brand-teal/5 rounded-2xl hover:shadow-xs transition-shadow"
                                     >
                                       <div className="flex flex-wrap justify-between items-start gap-2 border-b border-slate-100 dark:border-brand-teal/5 pb-2.5 mb-2.5">
@@ -3967,7 +4279,7 @@ export default function AdminPanel({
                                         <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">Service Details</span>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
                                           {order.subServices?.map((item, idx) => (
-                                            <div key={`${item.id || item.name}-${idx}`} className="flex justify-between items-center bg-slate-50/50 dark:bg-brand-deep/10 px-2.5 py-1 rounded-lg">
+                                            <div key={`cust-sub-${item.id || item.name || idx}-${idx}`} className="flex justify-between items-center bg-slate-50/50 dark:bg-brand-deep/10 px-2.5 py-1 rounded-lg">
                                               <span className="truncate">{item.name} <span className="text-[9px] text-slate-400">({item.serviceType})</span></span>
                                               <span className="font-mono text-slate-700 dark:text-slate-200 shrink-0 ml-2">x{item.quantity}</span>
                                             </div>
@@ -4300,7 +4612,7 @@ export default function AdminPanel({
                       <div className="space-y-4">
                         {deletedOrders.map((order, idx) => (
                           <div 
-                            key={`${order.orderId || 'deleted'}-${idx}`}
+                            key={`del-ord-${order.orderId || 'deleted'}-${idx}`}
                             className="bg-white dark:bg-brand-deep/20 rounded-2xl p-5 border border-slate-100 dark:border-brand-teal/5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6"
                           >
                             <div className="space-y-2.5 flex-1 min-w-0">

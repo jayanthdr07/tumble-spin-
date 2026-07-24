@@ -43,12 +43,12 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [subscribeStep, setSubscribeStep] = useState(1); // 1: Info/Form, 2: Payment, 3: Success
 
-  // Real PhonePe Gateway Payment States
+  // Real Cashfree Gateway Payment States
   const [merchantTransactionId, setMerchantTransactionId] = useState('');
   const [payUrl, setPayUrl] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [upiIntent, setUpiIntent] = useState('');
-  const [isSimulatingPhonePe, setIsSimulatingPhonePe] = useState(false);
+  const [isSimulatingCashfree, setIsSimulatingCashfree] = useState(false);
 
   const [qrExpired, setQrExpired] = useState(false);
   const [qrTimeLeft, setQrTimeLeft] = useState<number | null>(600); // 10 minutes
@@ -97,16 +97,16 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
     return () => clearInterval(timer);
   }, [subscribeStep, qrTimeLeft]);
 
-  // PhonePe Membership Payment Verification Polling
+  // Cashfree Membership Payment Verification Polling
   useEffect(() => {
     if (subscribeStep !== 2 || !merchantTransactionId || paymentStatus === 'success') return;
 
     const pollInterval = setInterval(async () => {
       try {
-        const response = await robustFetch(`/api/phonepe/status/${encodeURIComponent(merchantTransactionId)}`);
+        const response = await robustFetch(`/api/cashfree/status/${encodeURIComponent(merchantTransactionId)}`);
         const data = await response.json();
 
-        if (data.success && data.status === 'COMPLETED') {
+        if (data.success && (data.paymentStatus === 'paid' || data.verified === true)) {
           clearInterval(pollInterval);
           setPaymentStatus('success');
 
@@ -143,7 +143,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
           }, 1500);
         }
       } catch (err) {
-        console.error('[PhonePe Membership Polling Error]:', err);
+        console.error('[Cashfree Membership Polling Error]:', err);
       }
     }, 3000);
 
@@ -158,7 +158,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
     const amount = selectedPackage === 'SMART' ? 2000 : 5000;
 
     try {
-      const response = await robustFetch('/api/phonepe/initiate-membership', {
+      const response = await robustFetch('/api/cashfree/initiate-membership', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -172,7 +172,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
       const data = await response.json();
       if (!data.success) {
-        alert(data.error || 'Failed to initiate PhonePe payment.');
+        alert(data.error || 'Failed to initiate Cashfree payment.');
         setIsSubmitting(false);
         return;
       }
@@ -187,7 +187,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
       setQrTimeLeft(600);
       setPaymentStatus('idle');
     } catch (err: any) {
-      console.error('[Membership PhonePe Initiation Error]:', err);
+      console.error('[Membership Cashfree Initiation Error]:', err);
       alert('Failed to connect to payment server. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -647,10 +647,10 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                       </div>
                       <div className="space-y-2">
                         <h4 className="text-lg font-serif font-bold text-slate-800 dark:text-white animate-pulse">
-                          Authorizing PhonePe Gateway Handshake
+                          Authorizing Cashfree Gateway Handshake
                         </h4>
                         <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs font-mono">
-                          Checking secure settlement token with PhonePe Business servers...
+                          Checking secure settlement token with Cashfree servers...
                         </p>
                       </div>
                     </motion.div>
@@ -692,8 +692,8 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
                   <div>
                     <h3 className="text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <Lock className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                      PhonePe Secure Membership Checkout
+                      <Lock className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                      Cashfree Secure Membership Checkout
                     </h3>
                     <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mt-1">
                       Complete your payment of <strong>₹{rechargeAmount}</strong> to activate your <strong>{selectedPackage}</strong> plan.
@@ -703,23 +703,23 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                   {/* Responsive Grid Split */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                     
-                    {/* Left side: PhonePe Dynamic QR Code Container */}
+                    {/* Left side: Cashfree Dynamic QR Code Container */}
                     <div className="flex flex-col items-center space-y-4">
-                      <div className="p-4 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[240px] mx-auto">
+                      <div className="p-4 bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[240px] mx-auto">
                         <div className="relative p-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center">
                           <img 
                             src={qrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-                              upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`
+                              upiIntent || payUrl || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`
                             )}`}
                             onError={(e) => {
                               const target = e.currentTarget;
-                              const fallbackIntent = upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`;
+                              const fallbackIntent = upiIntent || payUrl || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`;
                               const alternateUrl = `https://quickchart.io/qr?size=200&text=${encodeURIComponent(fallbackIntent)}`;
                               if (target.src !== alternateUrl) {
                                 target.src = alternateUrl;
                               }
                             }}
-                            alt="Dynamic PhonePe QR"
+                            alt="Dynamic Cashfree QR"
                             className={`h-36 w-36 object-contain rounded-lg transition-all duration-300 ${qrExpired ? 'opacity-20 blur-[1.5px]' : ''}`}
                             referrerPolicy="no-referrer"
                           />
@@ -732,8 +732,8 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                           )}
                         </div>
 
-                        <p className="text-[9.5px] text-purple-700 dark:text-purple-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
-                          <span>🟣</span> PhonePe Dynamic QR
+                        <p className="text-[9.5px] text-teal-700 dark:text-teal-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
+                          <span>🟢</span> Cashfree Dynamic QR / UPI
                         </p>
 
                         {qrTimeLeft !== null && (
@@ -743,7 +743,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                                 ⚠️ QR code expired
                               </span>
                             ) : (
-                              <div className="flex items-center gap-1 text-[9.5px] font-bold text-purple-600 dark:text-purple-300 font-mono">
+                              <div className="flex items-center gap-1 text-[9.5px] font-bold text-teal-600 dark:text-teal-300 font-mono">
                                 <Clock className="h-3 w-3 animate-pulse" />
                                 <span>Expires in: {Math.floor(qrTimeLeft / 60)}:{(qrTimeLeft % 60).toString().padStart(2, '0')}</span>
                               </div>
@@ -752,26 +752,26 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                         )}
                       </div>
 
-                      {/* PhonePe Direct Redirect Link */}
+                      {/* Cashfree Direct Redirect Link */}
                       <div className="w-full text-center space-y-1">
-                        <p className="text-[10px] text-slate-400 font-medium">Pay directly on PhonePe App or Web:</p>
+                        <p className="text-[10px] text-slate-400 font-medium">Pay directly on Cashfree Web or App:</p>
                         {payUrl ? (
                           <a
                             href={payUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 dark:bg-purple-500 dark:text-white font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-500 dark:text-white font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            Pay ₹{rechargeAmount} with PhonePe Gateway
+                            Pay ₹{rechargeAmount} with Cashfree Gateway
                           </a>
                         ) : (
                           <a
                             href={upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 text-white hover:bg-teal-700 font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all cursor-pointer"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            Open PhonePe App (UPI)
+                            Open UPI App to Pay
                           </a>
                         )}
                       </div>
@@ -787,7 +787,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                         </div>
                         <div className="flex justify-between text-xs font-semibold">
                           <span className="text-slate-400">Selected Plan</span>
-                          <span className="text-purple-700 dark:text-purple-300 font-extrabold font-mono">{selectedPackage}</span>
+                          <span className="text-teal-700 dark:text-teal-300 font-extrabold font-mono">{selectedPackage}</span>
                         </div>
                         <div className="flex justify-between text-xs font-semibold">
                           <span className="text-slate-400">Total Recharge</span>
@@ -802,14 +802,14 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                       {/* Real-time Status Card */}
                       <div className="p-4 rounded-2xl bg-slate-900 text-white dark:bg-slate-950 border border-slate-800 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
                             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
                             Backend Verification Active
                           </span>
                           <span className="text-[10px] font-mono text-slate-400">Polling every 3s</span>
                         </div>
                         <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                          We are verifying payment status with PhonePe servers. Once confirmed, your subscription will activate instantly.
+                          We are querying Cashfree servers for real verified settlement. Once confirmed by Cashfree, your subscription will activate instantly!
                         </p>
                       </div>
 
@@ -818,9 +818,9 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                         <button
                           type="button"
                           onClick={async () => {
-                            setIsSimulatingPhonePe(true);
+                            setIsSimulatingCashfree(true);
                             try {
-                              const res = await robustFetch('/api/phonepe/simulate-payment', {
+                              const res = await robustFetch('/api/cashfree/simulate-payment', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -829,23 +829,23 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                                 })
                               });
                               if (res.ok) {
-                                console.log('[PhonePe Simulation] Backend payment verified successfully for membership.');
+                                console.log('[Cashfree Simulation] Backend payment verified successfully for membership.');
                               }
                             } catch (simErr) {
                               console.error('Simulation error:', simErr);
                             } finally {
-                              setIsSimulatingPhonePe(false);
+                              setIsSimulatingCashfree(false);
                             }
                           }}
-                          disabled={isSimulatingPhonePe}
+                          disabled={isSimulatingCashfree}
                           className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
-                          {isSimulatingPhonePe ? (
+                          {isSimulatingCashfree ? (
                             <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white border-t-transparent" />
                           ) : (
                             <ShieldCheck className="h-3.5 w-3.5" />
                           )}
-                          <span>⚡ Simulate PhonePe Payment Success (Sandbox Test)</span>
+                          <span>⚡ Simulate Cashfree Payment Success (Sandbox Test)</span>
                         </button>
                       </div>
 

@@ -351,12 +351,12 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
   }, [isSuccess, generatedOrderId]);
 
-  // Dynamic PhonePe & UPI Payment states
+  // Dynamic Cashfree & UPI Payment states
   const [showQrPayment, setShowQrPayment] = useState(false);
   const [merchantTransactionId, setMerchantTransactionId] = useState('');
   const [payUrl, setPayUrl] = useState('');
   const [upiIntent, setUpiIntent] = useState('');
-  const [isSimulatingPhonePe, setIsSimulatingPhonePe] = useState(false);
+  const [isSimulatingCashfree, setIsSimulatingCashfree] = useState(false);
   const [upiRefNo, setUpiRefNo] = useState('');
   const [userPaidAmount, setUserPaidAmount] = useState('');
   const [isAmountOverridden, setIsAmountOverridden] = useState(false);
@@ -419,11 +419,11 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     const targetId = merchantTransactionId || generatedOrderId;
     const interval = setInterval(async () => {
       try {
-        const res = await robustFetch(`/api/phonepe/status/${targetId}`);
+        const res = await robustFetch(`/api/cashfree/status/${targetId}`);
         if (!active) return;
         if (res.ok) {
           const data = await safeJsonParse(res, 'Transient status parsing error.');
-          if (data.paymentStatus === 'paid' || data.status === 'COMPLETED' || data.code === 'PAYMENT_SUCCESS') {
+          if (data.paymentStatus === 'paid' || data.verified === true) {
             clearInterval(interval);
             setPaymentStatus('success');
             downloadSuccessInvoice(data.orderId || generatedOrderId);
@@ -1023,7 +1023,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
 
     try {
-      const res = await robustFetch('/api/phonepe/initiate', {
+      const res = await robustFetch('/api/cashfree/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1036,10 +1036,10 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
       });
 
       if (!res.ok || !(res.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('PhonePe gateway endpoint returned invalid response.');
+        throw new Error('Cashfree gateway endpoint returned invalid response.');
       }
 
-      const data = await safeJsonParse(res, 'Failed to initiate PhonePe payment.');
+      const data = await safeJsonParse(res, 'Failed to initiate Cashfree payment.');
       setGeneratedOrderId(data.orderId);
       setMerchantTransactionId(data.merchantTransactionId || data.orderId);
       setPayUrl(data.payUrl || '');
@@ -1048,6 +1048,20 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
       setQrVpa(data.vpa || 'prakashcsat@oksbi');
       setQrTimeLeft(600);
       setQrExpired(false);
+
+      // Trigger Cashfree JS SDK Web Checkout if paymentSessionId present
+      if (data.paymentSessionId && (window as any).Cashfree) {
+        try {
+          const cfEnv = data.cashfreeEnv === 'PRODUCTION' ? 'production' : 'sandbox';
+          const cashfree = (window as any).Cashfree({ mode: cfEnv });
+          cashfree.checkout({
+            paymentSessionId: data.paymentSessionId,
+            redirectTarget: '_modal'
+          });
+        } catch (cfErr) {
+          console.warn('Cashfree JS SDK checkout launch notice:', cfErr);
+        }
+      }
 
       const orderTimeline = [
         { step: 1, title: 'Order Confirmed', desc: 'Booking received and digital invoice dispatched.', time: new Date().toLocaleString(), done: true, active: true },
@@ -1085,14 +1099,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
         orderStatus: 'Pending',
         smsOptIn: smsOptIn,
         timeline: orderTimeline,
-        paymentMethod: 'PhonePe Payment Gateway',
+        paymentMethod: 'Cashfree Payment Gateway',
         paymentDetails: {
-          type: 'PHONEPE_GATEWAY',
-          label: 'PhonePe Gateway (Pending)',
+          type: 'CASHFREE_GATEWAY',
+          label: 'Cashfree Gateway (Pending)',
           details: 'Awaiting verified settlement...'
         },
         paymentStatus: 'pending',
-        paymentGateway: 'phonepe',
+        paymentGateway: 'cashfree',
         createdAt: new Date().toISOString()
       };
 
@@ -1218,153 +1232,47 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     }
   };
 
-  // Verifies the payment by triggering a secure backend ledger update
+  // Verifies the payment by triggering a secure backend status query
   const handleVerifyAndCompleteQrPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!upiRefNo.trim()) {
-      setFormErrors({ qrPayment: 'Please enter the 12-digit UPI Transaction Ref or UTR number.' });
-      return;
-    }
-    if (upiRefNo.trim().length < 8) {
-      setFormErrors({ qrPayment: 'Please enter a valid transaction reference or UTR.' });
-      return;
-    }
-
-    const expectedTotal = Number(getGrandTotal());
-    const enteredAmount = Number(userPaidAmount);
-
-    if (!userPaidAmount || isNaN(enteredAmount) || enteredAmount <= 0) {
-      setFormErrors({ qrPayment: 'Please enter the exact paid amount matching your bank/UPI transaction history.' });
-      return;
-    }
-
-    if (Math.abs(enteredAmount - expectedTotal) > 0.01 && !isAmountOverridden) {
-      setFormErrors({ 
-        qrPayment: `Amount Mismatch: The entered payment of ₹${enteredAmount.toFixed(2)} does not match the quoted invoice of ₹${expectedTotal.toFixed(2)}. Please correct the amount, fetch it from history, or click 'Acknowledge Mismatch' below to bypass.` 
-      });
+    const targetId = merchantTransactionId || generatedOrderId;
+    if (!targetId) {
+      setFormErrors({ qrPayment: 'No active transaction ID found.' });
       return;
     }
 
     setIsVerifyingQr(true);
     setFormErrors({});
     
-    setQrVerificationMsg('Establishing secure network handshake with NPCI node...');
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    setQrVerificationMsg('Verifying UPI Ref ID against central bank settlement database...');
+    setQrVerificationMsg('Connecting to Cashfree gateway server for real-time payment verification...');
+    await new Promise(resolve => setTimeout(resolve, 600));
     
     try {
-      const res = await robustFetch('/api/payments/simulate-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          orderId: generatedOrderId,
-          amount: getGrandTotal()
-        })
-      });
+      const res = await robustFetch(`/api/cashfree/status/${targetId}`);
+      if (res.ok) {
+        const data = await safeJsonParse(res, 'Failed to parse Cashfree verification response.');
+        if (data.paymentStatus === 'paid' || data.verified === true) {
+          setQrVerificationMsg('Payment verified & authorized by Cashfree! Provisioning your laundry order...');
+          await new Promise(resolve => setTimeout(resolve, 800));
 
-      if (!res.ok || !(res.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('Simulation endpoint offline');
-      }
-
-      // Proactively update local orders with Paid status to prevent syncing stale pending states
-      const localOrdersStr = localStorage.getItem('tumblespin_orders') || '[]';
-      let localOrders = [];
-      try {
-        localOrders = JSON.parse(localOrdersStr);
-        if (!Array.isArray(localOrders)) localOrders = [];
-      } catch (e) {}
-
-      let updatedSimulatedOrder: any = null;
-      localOrders = localOrders.map((o: any) => {
-        if (o.orderId === generatedOrderId) {
-          updatedSimulatedOrder = {
-            ...o,
-            status: 'Confirmed',
-            paymentStatus: 'paid',
-            upiRefNo: upiRefNo,
-            paymentDetails: {
-              type: 'UPI_QR',
-              label: 'UPI Dynamic QR (Verified)',
-              details: `Settled with UPI Ref: ${upiRefNo}`
-            }
-          };
-          return updatedSimulatedOrder;
+          downloadSuccessInvoice(data.orderId || generatedOrderId);
+          setIsVerifyingQr(false);
+          setShowQrPayment(false);
+          setIsSuccess(true);
+          return;
+        } else {
+          setFormErrors({ 
+            qrPayment: 'Cashfree has not received or verified this payment yet. Please complete payment on the gateway screen or UPI QR code and try again.' 
+          });
         }
-        return o;
-      });
-      localStorage.setItem('tumblespin_orders', JSON.stringify(localOrders));
-
-      if (updatedSimulatedOrder) {
-        try {
-          await setDoc(doc(db, 'orders', generatedOrderId), updatedSimulatedOrder);
-          console.log(`[BookingModal] Order ${generatedOrderId} payment updated to Paid in Firestore.`);
-        } catch (fsErr) {
-          console.warn('Client-side Firestore setDoc error on payment simulation (non-fatal):', fsErr);
-        }
+      } else {
+        setFormErrors({ qrPayment: 'Unable to connect to Cashfree verification service. Please try again in a moment.' });
       }
-
-      window.dispatchEvent(new Event('storage'));
-
-      setQrVerificationMsg('Payment verified & authorized! Provisioning your premium laundry slot...');
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      setIsVerifyingQr(false);
-      setShowQrPayment(false);
-      setIsSuccess(true);
     } catch (err: any) {
-      console.warn('Backend verification route unavailable or synchronizing. Settling directly via client-side Firestore update:', err);
-      
-      try {
-        setQrVerificationMsg('Offline fallback: Verifying transaction locally with central ledger...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        const localOrdersStr = localStorage.getItem('tumblespin_orders') || '[]';
-        let localOrders = [];
-        try {
-          localOrders = JSON.parse(localOrdersStr);
-          if (!Array.isArray(localOrders)) localOrders = [];
-        } catch (e) {}
-
-        let updatedOrder: any = null;
-        localOrders = localOrders.map((o: any) => {
-          if (o.orderId === generatedOrderId) {
-            updatedOrder = {
-              ...o,
-              status: 'Confirmed',
-              paymentStatus: 'paid',
-              paymentDetails: {
-                type: 'UPI_QR',
-                label: 'UPI Dynamic QR (Settled)',
-                details: `Settled with UPI Ref: ${upiRefNo}`
-              }
-            };
-            return updatedOrder;
-          }
-          return o;
-        });
-
-        localStorage.setItem('tumblespin_orders', JSON.stringify(localOrders));
-
-        if (updatedOrder) {
-          try {
-            await setDoc(doc(db, 'orders', generatedOrderId), updatedOrder);
-          } catch (fsErr) {
-            console.warn('Direct Firestore status update failed, relying on localStorage sync:', fsErr);
-          }
-        }
-
-        setQrVerificationMsg('Payment verified & authorized! Provisioning slot...');
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        setIsVerifyingQr(false);
-        setShowQrPayment(false);
-        setIsSuccess(true);
-      } catch (innerErr: any) {
-        console.error('Ultimate verification fallback failure:', innerErr);
-        setFormErrors({ qrPayment: 'Manual verification failed. Please try again.' });
-        setIsVerifyingQr(false);
-      }
+      console.error('Cashfree backend status verification error:', err);
+      setFormErrors({ qrPayment: 'Verification failed: ' + (err.message || 'Network error') });
+    } finally {
+      setIsVerifyingQr(false);
     }
   };
 
@@ -2062,35 +1970,35 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                   id="booking-qr-payment-screen"
                 >
                   <div className="text-center space-y-1">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-600/10 text-purple-700 dark:bg-purple-400/10 dark:text-purple-300">
-                      🔒 PhonePe Business Secure Gateway
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-600/10 text-teal-700 dark:bg-teal-400/10 dark:text-teal-300">
+                      🔒 Cashfree Business Secure Gateway
                     </span>
                     <h4 className="text-lg font-serif font-bold text-slate-900 dark:text-white pt-1">
-                      Complete Your Payment via PhonePe
+                      Complete Your Payment via Cashfree Gateway
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                      Scan the dynamic PhonePe QR code or click the payment link below. Your booking will automatically move to confirmed once payment is verified.
+                      Scan the dynamic Cashfree QR code or click the payment button below. Your booking will automatically move to confirmed once backend verification succeeds.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start w-full">
-                    {/* Left Column: PhonePe QR Code Container */}
+                    {/* Left Column: Cashfree QR Code Container */}
                     <div className="md:col-span-6 flex flex-col items-center">
-                      <div className="p-4 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[280px] mx-auto">
+                      <div className="p-4 bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[280px] mx-auto">
                         <div className="relative p-3 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center">
                           <img 
                             src={qrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                              upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`
+                              upiIntent || payUrl || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`
                             )}`}
                             onError={(e) => {
                               const target = e.currentTarget;
-                              const fallbackIntent = upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`;
+                              const fallbackIntent = upiIntent || payUrl || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(getGrandTotal()).toFixed(2)}&cu=INR&tn=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}&tr=Order_${(generatedOrderId || '').replace(/\s+/g, '_')}`;
                               const alternateUrl = `https://quickchart.io/qr?size=250&text=${encodeURIComponent(fallbackIntent)}`;
                               if (target.src !== alternateUrl) {
                                 target.src = alternateUrl;
                               }
                             }}
-                            alt="Dynamic PhonePe QR"
+                            alt="Dynamic Cashfree QR"
                             className={`h-40 w-40 object-contain rounded-lg transition-all duration-300 ${qrExpired ? 'opacity-20 blur-[1.5px]' : ''}`}
                             referrerPolicy="no-referrer"
                           />
@@ -2102,8 +2010,8 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             </div>
                           )}
                         </div>
-                        <p className="text-[9.5px] text-purple-700 dark:text-purple-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
-                          <span>🟣</span> PhonePe Dynamic QR
+                        <p className="text-[9.5px] text-teal-700 dark:text-teal-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
+                          <span>🟢</span> Cashfree Dynamic QR / UPI
                         </p>
 
                         {qrTimeLeft !== null && (
@@ -2113,7 +2021,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                                 ⚠️ Session expired
                               </span>
                             ) : (
-                              <div className="flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-300 font-mono">
+                              <div className="flex items-center gap-1 text-[10px] font-bold text-teal-600 dark:text-teal-300 font-mono">
                                 <Clock className="h-3 w-3 animate-pulse" />
                                 <span>Expires in: {Math.floor(qrTimeLeft / 60)}:{(qrTimeLeft % 60).toString().padStart(2, '0')}</span>
                               </div>
@@ -2121,9 +2029,9 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                           </div>
                         )}
 
-                        <div className="pt-1.5 border-t border-purple-100 dark:border-purple-900/40 w-full text-center">
+                        <div className="pt-1.5 border-t border-teal-100 dark:border-teal-900/40 w-full text-center">
                           <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
-                            Scan with PhonePe, GPay, Paytm or BHIM
+                            Scan with GPay, PhonePe, Paytm, or BHIM
                           </p>
                         </div>
                       </div>
@@ -2135,7 +2043,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                       <div className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 grid grid-cols-2 gap-3 shadow-xs">
                         <div className="space-y-0.5">
                           <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Payable Amount</p>
-                          <p className="text-base font-black font-mono text-purple-700 dark:text-purple-300">₹{getGrandTotal()}</p>
+                          <p className="text-base font-black font-mono text-teal-700 dark:text-teal-300">₹{getGrandTotal()}</p>
                         </div>
                         <div className="space-y-0.5 text-right">
                           <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Txn / Order ID</p>
@@ -2143,14 +2051,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                         </div>
                       </div>
 
-                      {/* PhonePe Pay Link */}
-                      <div className="w-full bg-purple-50/80 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/40 rounded-2xl p-4 text-center flex flex-col items-center space-y-3 shadow-xs">
+                      {/* Cashfree Pay Link */}
+                      <div className="w-full bg-teal-50/80 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-800/40 rounded-2xl p-4 text-center flex flex-col items-center space-y-3 shadow-xs">
                         <div>
-                          <p className="text-xs font-black text-purple-900 dark:text-purple-200 uppercase tracking-wider flex items-center justify-center gap-1.5">
-                            ⚡ PhonePe Payment Gateway Link
+                          <p className="text-xs font-black text-teal-900 dark:text-teal-200 uppercase tracking-wider flex items-center justify-center gap-1.5">
+                            ⚡ Cashfree Payment Gateway Checkout
                           </p>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mt-1">
-                            Click below to complete payment directly on the PhonePe web/app payment gateway.
+                            Click below to complete payment securely on the Cashfree checkout gateway.
                           </p>
                         </div>
 
@@ -2159,18 +2067,18 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             href={payUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-purple-600 text-white hover:bg-purple-700 dark:bg-purple-500 dark:text-white font-black text-xs uppercase tracking-widest shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
+                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-500 dark:text-white font-black text-xs uppercase tracking-widest shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
                           >
                             <ExternalLink className="h-4 w-4" />
-                            Pay ₹{getGrandTotal()} via PhonePe
+                            Pay ₹{getGrandTotal()} via Cashfree
                           </a>
                         ) : (
                           <a 
                             href={upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${getGrandTotal()}&cu=INR`}
-                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-purple-600 text-white hover:bg-purple-700 font-black text-xs uppercase tracking-widest shadow-md transition-all cursor-pointer"
+                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white hover:bg-teal-700 font-black text-xs uppercase tracking-widest shadow-md transition-all cursor-pointer"
                           >
                             <ExternalLink className="h-4 w-4" />
-                            Open PhonePe App (UPI)
+                            Open UPI App to Pay
                           </a>
                         )}
                       </div>
@@ -2178,14 +2086,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                       {/* Real-time Backend Status Indicator */}
                       <div className="p-4 rounded-2xl bg-slate-900 text-white dark:bg-slate-950 border border-slate-800 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
                             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                            Backend Verification Active
+                            Backend Cashfree Verification Active
                           </span>
                           <span className="text-[10px] font-mono text-slate-400">Polling every 3s</span>
                         </div>
                         <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                          We are listening for secure settlement notification from PhonePe. Once verified, this screen will move directly to Success!
+                          We are querying Cashfree servers for real verified settlement. Once confirmed by Cashfree, your order will unlock automatically!
                         </p>
                       </div>
 
@@ -2194,9 +2102,9 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                         <button
                           type="button"
                           onClick={async () => {
-                            setIsSimulatingPhonePe(true);
+                            setIsSimulatingCashfree(true);
                             try {
-                              const res = await robustFetch('/api/phonepe/simulate-payment', {
+                              const res = await robustFetch('/api/cashfree/simulate-payment', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -2206,23 +2114,23 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                                 })
                               });
                               if (res.ok) {
-                                console.log('[PhonePe Simulation] Backend payment verified successfully.');
+                                console.log('[Cashfree Simulation] Backend payment verified successfully.');
                               }
                             } catch (simErr) {
                               console.error('Simulation error:', simErr);
                             } finally {
-                              setIsSimulatingPhonePe(false);
+                              setIsSimulatingCashfree(false);
                             }
                           }}
-                          disabled={isSimulatingPhonePe}
+                          disabled={isSimulatingCashfree}
                           className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
-                          {isSimulatingPhonePe ? (
+                          {isSimulatingCashfree ? (
                             <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white border-t-transparent" />
                           ) : (
                             <ShieldCheck className="h-3.5 w-3.5" />
                           )}
-                          <span>⚡ Simulate PhonePe Payment Success (Sandbox Test)</span>
+                          <span>⚡ Simulate Cashfree Payment Success (Sandbox Test)</span>
                         </button>
                       </div>
 
@@ -2662,7 +2570,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                           const qty = quantities[item.id] || 0;
                           return (
                             <div 
-                              key={`${item.id}-${idx}`}
+                              key={`modal-sub-${item.id}-${idx}`}
                               className={`p-3 rounded-2xl border flex justify-between items-center transition-all ${
                                 qty > 0 
                                   ? 'border-brand-primary bg-brand-primary/[0.02] dark:border-brand-accent/50 dark:bg-brand-accent/[0.02]' 
@@ -2965,7 +2873,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                               <span className="font-semibold text-slate-800 dark:text-white block mb-1.5">Itemized Garments & Estimates:</span>
                               <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
                                 {getSelectedItemsWithDetails().map((sub, sidx) => (
-                                  <div key={`${sub.id || sub.name}-${sidx}`} className="flex justify-between items-center text-[11px] text-slate-600 dark:text-slate-300 py-0.5">
+                                  <div key={`review-sub-${sub.id || sub.name || sidx}-${sidx}`} className="flex justify-between items-center text-[11px] text-slate-600 dark:text-slate-300 py-0.5">
                                     <span className="flex items-center gap-1.5 min-w-0">
                                       <span className="text-brand-primary dark:text-brand-accent flex-shrink-0">
                                         {getItemIcon(sub.id || sub.name, "h-3.5 w-3.5")}

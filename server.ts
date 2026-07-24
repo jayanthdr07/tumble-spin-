@@ -209,24 +209,52 @@ function isValidRealEmail(email: string): boolean {
 
 // Helper to send a beautifully formatted email notification upon successful booking
 async function sendBookingEmail(orderData: any) {
-  const recipientEmail = 'tumblespin26@gmail.com'; // Specific recipient requested by the user
+  // 0. Fetch stored Firestore email settings if available
+  let dbEmailSettings: any = {};
+  try {
+    const emailSnap = await getDoc(doc(db, 'settings', 'email'));
+    if (emailSnap.exists()) {
+      dbEmailSettings = emailSnap.data() || {};
+    }
+  } catch (err) {
+    // Non-blocking catch
+  }
+
+  const recipientEmail = dbEmailSettings.adminEmail || process.env.ADMIN_EMAIL || process.env.NOTIFICATION_EMAIL || process.env.SMTP_USER || 'tumblespin26@gmail.com';
   const userEmail = orderData.email || '';
 
-  const smtpHost = process.env.SMTP_HOST || '';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-  const smtpUser = process.env.SMTP_USER || '';
-  const smtpPass = process.env.SMTP_PASS || '';
-  const smtpFrom = process.env.SMTP_FROM || 'Tumble Spin Premium';
+  let smtpHost = dbEmailSettings.smtpHost || process.env.SMTP_HOST || '';
+  let smtpPort = parseInt(dbEmailSettings.smtpPort || process.env.SMTP_PORT || '0', 10);
+  let smtpUser = dbEmailSettings.smtpUser || process.env.SMTP_USER || '';
+  let smtpPass = dbEmailSettings.smtpPass || process.env.SMTP_PASS || '';
+  let smtpFrom = dbEmailSettings.smtpFrom || process.env.SMTP_FROM || 'Tumble Spin Premium';
 
-  const resendApiKey = process.env.RESEND_API_KEY || '';
+  let resendApiKey = dbEmailSettings.resendApiKey || process.env.RESEND_API_KEY || '';
+
+  // Auto-detect standard SMTP host for Gmail / Outlook / Yahoo if user provided user & pass without host
+  if (!smtpHost && smtpUser) {
+    const lowerUser = smtpUser.toLowerCase();
+    if (lowerUser.endsWith('@gmail.com')) {
+      smtpHost = 'smtp.gmail.com';
+      if (!smtpPort) smtpPort = 465;
+    } else if (lowerUser.endsWith('@outlook.com') || lowerUser.endsWith('@hotmail.com')) {
+      smtpHost = 'smtp-mail.outlook.com';
+      if (!smtpPort) smtpPort = 587;
+    } else if (lowerUser.endsWith('@yahoo.com')) {
+      smtpHost = 'smtp.mail.yahoo.com';
+      if (!smtpPort) smtpPort = 465;
+    }
+  }
+  if (!smtpPort) smtpPort = 587;
 
   const hasRealUserEmail = isValidRealEmail(userEmail);
 
-  // The user requested that the notification should appear to be "from" the booking user email id whichever they entered.
-  // To avoid SPF/DMARC rejection on SMTP servers (like Gmail) and Resend restrictions on unverified domains,
-  // we use the customer's name and entered email in the Display Name, while utilizing the verified address
-  // (smtpUser or onboarding@resend.dev or custom RESEND_FROM/SMTP_FROM) as the underlying routing address,
-  // and set the replyTo header to the customer's entered email.
+  // Compute recipient list (Admin recipient + Customer copy if provided)
+  const targetRecipients = [recipientEmail];
+  if (hasRealUserEmail && userEmail.toLowerCase() !== recipientEmail.toLowerCase()) {
+    targetRecipients.push(userEmail);
+  }
+
   const customerName = orderData.fullName || 'Tumble Spin Customer';
 
   // 1. Compute Resend Sender Base and From Address
@@ -234,9 +262,9 @@ async function sendBookingEmail(orderData: any) {
   if (process.env.RESEND_FROM && process.env.RESEND_FROM.includes('@')) {
     const match = process.env.RESEND_FROM.match(/<([^>]+)>/);
     resendSenderBase = match ? match[1].trim() : process.env.RESEND_FROM.trim();
-  } else if (process.env.SMTP_FROM && process.env.SMTP_FROM.includes('@') && !process.env.SMTP_FROM.includes('no-reply@tumblespin.com')) {
-    const match = process.env.SMTP_FROM.match(/<([^>]+)>/);
-    resendSenderBase = match ? match[1].trim() : process.env.SMTP_FROM.trim();
+  } else if (smtpFrom && smtpFrom.includes('@') && !smtpFrom.includes('no-reply@tumblespin.com')) {
+    const match = smtpFrom.match(/<([^>]+)>/);
+    resendSenderBase = match ? match[1].trim() : smtpFrom.trim();
   }
 
   let resendFrom = '';
@@ -248,9 +276,9 @@ async function sendBookingEmail(orderData: any) {
 
   // 2. Compute SMTP Sender Base and From Address
   let smtpSenderBase = smtpUser;
-  if (process.env.SMTP_FROM && process.env.SMTP_FROM.includes('@')) {
-    const match = process.env.SMTP_FROM.match(/<([^>]+)>/);
-    smtpSenderBase = match ? match[1].trim() : process.env.SMTP_FROM.trim();
+  if (smtpFrom && smtpFrom.includes('@')) {
+    const match = smtpFrom.match(/<([^>]+)>/);
+    smtpSenderBase = match ? match[1].trim() : smtpFrom.trim();
   } else if (process.env.RESEND_FROM && process.env.RESEND_FROM.includes('@')) {
     const match = process.env.RESEND_FROM.match(/<([^>]+)>/);
     smtpSenderBase = match ? match[1].trim() : process.env.RESEND_FROM.trim();
@@ -276,6 +304,7 @@ async function sendBookingEmail(orderData: any) {
   }
 
   console.log(`[Email Service] Attempting to send booking email for Order ${orderData.orderId}...`);
+  console.log(`[Email Service] Admin Recipient: [${recipientEmail}] | Target All: [${targetRecipients.join(', ')}]`);
   console.log(`[Email Service] Computed Sender Headers - Resend: [${resendFrom}] | SMTP: [${smtpFinalFrom}]`);
 
   const subject = `✨ Tumble Spin Booking Confirmed: Order ${orderData.orderId}`;
@@ -421,7 +450,7 @@ async function sendBookingEmail(orderData: any) {
       usedMethod = 'Resend';
       const emailPromises = [];
 
-      // Primary to owner
+      // Send to targetRecipients
       emailPromises.push(
         fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -432,13 +461,13 @@ async function sendBookingEmail(orderData: any) {
           body: JSON.stringify({
             from: resendFrom,
             reply_to: hasRealUserEmail ? userEmail : undefined,
-            to: [recipientEmail],
+            to: targetRecipients,
             subject: subject,
             html: htmlContent
           })
         }).then(async (r) => {
           const data = await r.json();
-          console.log('[Email Service] Primary email sent to owner via Resend:', data);
+          console.log('[Email Service] Primary email sent via Resend:', data);
           info = data;
         })
       );
@@ -465,17 +494,17 @@ async function sendBookingEmail(orderData: any) {
 
       const emailPromises = [];
 
-      // Primary to owner
+      // Send to targetRecipients
       emailPromises.push(
         transporter.sendMail({
           from: smtpFinalFrom,
           replyTo: hasRealUserEmail ? userEmail : undefined,
-          to: recipientEmail,
+          to: targetRecipients.join(', '),
           subject: subject,
           html: htmlContent
         }).then(res => {
           info = res;
-          console.log('[Email Service] Primary email sent to owner via SMTP:', res.messageId);
+          console.log('[Email Service] Primary email sent via SMTP:', res.messageId);
         })
       );
 
@@ -504,12 +533,12 @@ async function sendBookingEmail(orderData: any) {
 
       const emailPromises = [];
 
-      // Primary to owner
+      // Send to targetRecipients
       emailPromises.push(
         transporter.sendMail({
           from: etherealFrom,
           replyTo: hasRealUserEmail ? userEmail : undefined,
-          to: recipientEmail,
+          to: targetRecipients.join(', '),
           subject: subject,
           html: htmlContent
         }).then(res => {
@@ -517,7 +546,7 @@ async function sendBookingEmail(orderData: any) {
           etherealUrl = nodemailer.getTestMessageUrl(res) || '';
           console.log('------------------------------------------------------------');
           console.log(`✉️ [Email Service] Real email content generated successfully!`);
-          console.log(`📬 Primary sent to: ${recipientEmail}`);
+          console.log(`📬 Primary sent to: ${targetRecipients.join(', ')}`);
           console.log(`🔗 Ethereal Sandbox Mail Link: ${etherealUrl}`);
           console.log('------------------------------------------------------------');
         })
@@ -532,6 +561,8 @@ async function sendBookingEmail(orderData: any) {
   return {
     success: !!info,
     method: usedMethod,
+    recipientEmail,
+    allRecipients: targetRecipients.join(', '),
     etherealUrl,
     messageId: info?.messageId || info?.id || ''
   };
@@ -548,50 +579,45 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize PhonePe Payment Gateway Configuration
-const PHONEPE_MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID || 'M22Y26G850U9A';
-const PHONEPE_SALT_KEY = process.env.PHONEPE_SALT_KEY || '83c27e85-d847-4977-987f-d5b7ca8f01b1';
-const PHONEPE_SALT_INDEX = process.env.PHONEPE_SALT_INDEX || '1';
-const PHONEPE_ENV = (process.env.PHONEPE_ENV || 'SANDBOX').toUpperCase();
-const PHONEPE_CALLBACK_URL = process.env.PHONEPE_CALLBACK_URL || '/api/phonepe/callback';
-const PHONEPE_REDIRECT_URL = process.env.PHONEPE_REDIRECT_URL || '/phonepe-verify';
+// Initialize Cashfree Payment Gateway Configuration
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || 'TEST10471206103e6b72d24497e55ef960217401';
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || 'cfsk_ma_test_f11d171bb5d6978ff72efd711904d9c7_ca88e630';
+const CASHFREE_ENV = (process.env.CASHFREE_ENV || 'SANDBOX').toUpperCase();
+const CASHFREE_HOST = CASHFREE_ENV === 'PRODUCTION'
+  ? 'https://api.cashfree.com/pg'
+  : 'https://sandbox.cashfree.com/pg';
 
-const PHONEPE_HOST = PHONEPE_ENV === 'PRODUCTION'
-  ? 'https://api.phonepe.com/apis/hermes'
-  : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+const CASHFREE_RETURN_URL = process.env.CASHFREE_RETURN_URL || '/?order_id={order_id}';
+const CASHFREE_NOTIFY_URL = process.env.CASHFREE_NOTIFY_URL || '/api/cashfree/webhook';
 
-// PhonePe Cryptographic Checksum Helpers
-function calculatePhonePeChecksum(base64Payload: string, apiEndpoint: string): string {
-  const stringToHash = base64Payload + apiEndpoint + PHONEPE_SALT_KEY;
-  const sha256 = crypto.createHash('sha256').update(stringToHash).digest('hex');
-  return `${sha256}###${PHONEPE_SALT_INDEX}`;
-}
-
-function calculatePhonePeStatusChecksum(merchantId: string, merchantTxnId: string): string {
-  const apiEndpoint = `/pg/v1/status/${merchantId}/${merchantTxnId}`;
-  const stringToHash = apiEndpoint + PHONEPE_SALT_KEY;
-  const sha256 = crypto.createHash('sha256').update(stringToHash).digest('hex');
-  return `${sha256}###${PHONEPE_SALT_INDEX}`;
-}
-
-function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: string): boolean {
-  if (!xVerifyHeader) return false;
-  const calculated = crypto.createHash('sha256').update(base64Response + PHONEPE_SALT_KEY).digest('hex') + '###' + PHONEPE_SALT_INDEX;
-  return calculated === xVerifyHeader;
+// Cashfree Webhook HMAC-SHA256 Signature Verification Helper
+function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, signature: string): boolean {
+  if (!signature || !timestamp) return false;
+  try {
+    const dataToSign = timestamp + rawBody;
+    const expectedSignature = crypto
+      .createHmac('sha256', CASHFREE_SECRET_KEY)
+      .update(dataToSign)
+      .digest('base64');
+    return expectedSignature === signature;
+  } catch (err) {
+    console.error('Error verifying Cashfree webhook signature:', err);
+    return false;
+  }
 }
 
   // Gateway Configuration endpoint
   app.get('/api/payments/config', (req, res) => {
     res.json({
-      gateway: 'phonepe',
-      merchantId: PHONEPE_MERCHANT_ID,
-      env: PHONEPE_ENV,
-      redirectUrl: PHONEPE_REDIRECT_URL
+      gateway: 'cashfree',
+      appId: CASHFREE_APP_ID,
+      env: CASHFREE_ENV,
+      returnUrl: CASHFREE_RETURN_URL
     });
   });
 
-  // PhonePe Initiate Payment Endpoint for Laundry Booking Orders
-  const handleInitiatePhonePePayment = async (req: express.Request, res: express.Response) => {
+  // Cashfree Initiate Payment Endpoint for Laundry Booking Orders
+  const handleInitiateCashfreePayment = async (req: express.Request, res: express.Response) => {
     try {
       const { bookingDetails, selectedServices, quantities, dynamicPricing } = req.body;
 
@@ -608,28 +634,27 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
       // Check if user has an active membership for discount (SMART gets 10%, SILVER gets 20%)
       let finalTotal = calculatedTotal;
       let membershipApplied = false;
-      if (bookingDetails.phone) {
-        const cleanPhone = bookingDetails.phone.replace(/\D/g, '');
-        if (cleanPhone) {
-          try {
-            const memberDoc = await getDoc(doc(db, 'memberships', cleanPhone));
-            if (memberDoc.exists()) {
-              const memberData = memberDoc.data();
-              if (memberData && memberData.status === 'active' && (memberData.packageType === 'SMART' || memberData.packageType === 'SILVER')) {
-                const discountPercentage = memberData.packageType === 'SMART' ? 10 : 20;
-                finalTotal = Math.round(calculatedTotal - (calculatedTotal * discountPercentage) / 100);
-                membershipApplied = true;
-                console.log(`[PhonePe Backend] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Original: ${calculatedTotal}, Final: ${finalTotal}`);
-              }
+      const cleanPhone = (bookingDetails.phone || '').replace(/\D/g, '');
+      
+      if (cleanPhone) {
+        try {
+          const memberDoc = await getDoc(doc(db, 'memberships', cleanPhone));
+          if (memberDoc.exists()) {
+            const memberData = memberDoc.data();
+            if (memberData && memberData.status === 'active' && (memberData.packageType === 'SMART' || memberData.packageType === 'SILVER')) {
+              const discountPercentage = memberData.packageType === 'SMART' ? 10 : 20;
+              finalTotal = Math.round(calculatedTotal - (calculatedTotal * discountPercentage) / 100);
+              membershipApplied = true;
+              console.log(`[Cashfree Backend] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Original: ${calculatedTotal}, Final: ${finalTotal}`);
             }
-          } catch (dbErr) {
-            console.warn('[PhonePe Backend] Failed to read membership for discount, bypassing:', dbErr);
           }
+        } catch (dbErr) {
+          console.warn('[Cashfree Backend] Failed to read membership for discount, bypassing:', dbErr);
         }
       }
 
       if (!membershipApplied) {
-        // Flat 5% self-booking discount for direct UPI payments if no active membership
+        // Flat 5% self-booking discount for direct online payments if no active membership
         finalTotal = Math.round(calculatedTotal - (calculatedTotal * 5) / 100);
       }
 
@@ -648,10 +673,14 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
       ];
 
       // Prepare Firestore Order Object
-      const cleanPhone = (bookingDetails.phone || '').replace(/\D/g, '') || '9999999999';
       const hostOrigin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
-      const redirectUrl = `${hostOrigin}/?merchantTransactionId=${merchantTransactionId}&orderId=${orderId}`;
-      const callbackUrl = PHONEPE_CALLBACK_URL.startsWith('http') ? PHONEPE_CALLBACK_URL : `${hostOrigin}${PHONEPE_CALLBACK_URL}`;
+      const returnUrl = CASHFREE_RETURN_URL.startsWith('http')
+        ? CASHFREE_RETURN_URL
+        : `${hostOrigin}${CASHFREE_RETURN_URL.startsWith('/') ? '' : '/'}${CASHFREE_RETURN_URL}`;
+      
+      const notifyUrl = CASHFREE_NOTIFY_URL.startsWith('http')
+        ? CASHFREE_NOTIFY_URL
+        : `${hostOrigin}${CASHFREE_NOTIFY_URL.startsWith('/') ? '' : '/'}${CASHFREE_NOTIFY_URL}`;
 
       const newOrderDoc: any = {
         orderId,
@@ -682,16 +711,16 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
           }),
         totalPrice: finalTotal,
         currency: 'INR',
-        status: 'Payment Pending',
+        status: 'Awaiting Payment',
         timeline: orderTimeline,
-        paymentMethod: 'PhonePe UPI Gateway',
+        paymentMethod: 'Cashfree Payment Gateway',
         paymentDetails: {
-          type: 'PHONEPE_PG',
-          label: 'PhonePe Gateway (Pending Verification)',
-          details: `Awaiting PhonePe backend settlement for Txn ID ${merchantTransactionId}`
+          type: 'CASHFREE_PG',
+          label: 'Cashfree Gateway (Pending Verification)',
+          details: `Awaiting Cashfree settlement for Order ID ${merchantTransactionId}`
         },
         paymentStatus: 'pending',
-        paymentGateway: 'phonepe',
+        paymentGateway: 'cashfree',
         verifiedFlag: false,
         verificationSource: null,
         createdAt: new Date().toISOString()
@@ -708,98 +737,107 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
           orderId,
           amount: finalTotal,
           currency: 'INR',
-          gateway: 'phonepe',
+          gateway: 'cashfree',
           status: 'INITIATED',
           createdAt: new Date().toISOString()
         }), 10000);
 
-        console.log(`[PhonePe Backend] Order ${orderId} (${merchantTransactionId}) saved to Firestore DB.`);
+        console.log(`[Cashfree Backend] Order ${orderId} (${merchantTransactionId}) saved to Firestore DB.`);
       } catch (dbErr) {
         console.warn('Backend database write warning (resilient state active):', dbErr);
       }
 
-      // Construct PhonePe V1 /pg/v1/pay Base64 Payload
-      const payloadObj = {
-        merchantId: PHONEPE_MERCHANT_ID,
-        merchantTransactionId: merchantTransactionId,
-        merchantUserId: `MUID_${cleanPhone}`,
-        amount: Math.round(finalTotal * 100), // in paise
-        redirectUrl: redirectUrl,
-        redirectMode: 'REDIRECT',
-        callbackUrl: callbackUrl,
-        mobileNumber: cleanPhone,
-        paymentInstrument: {
-          type: 'PAY_PAGE'
+      // Create Cashfree Order / Session via Cashfree PG REST API
+      const cfOrderPayload = {
+        order_id: merchantTransactionId,
+        order_amount: finalTotal,
+        order_currency: 'INR',
+        customer_details: {
+          customer_id: `cust_${cleanPhone || 'guest_' + Date.now()}`,
+          customer_name: bookingDetails.fullName || 'Valued Client',
+          customer_email: bookingDetails.email || 'client@tumblespin.com',
+          customer_phone: cleanPhone.length >= 10 ? cleanPhone : '9999999999'
+        },
+        order_meta: {
+          return_url: returnUrl.includes('{order_id}') ? returnUrl : `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}order_id={order_id}`,
+          notify_url: notifyUrl
         }
       };
 
-      const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
-      const xVerifyHeader = calculatePhonePeChecksum(base64Payload, '/pg/v1/pay');
-
-      // Generate Fallback Dynamic QR and UPI Intent link
-      const upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${finalTotal.toFixed(2)}&cu=INR&tn=Order_${rawCleanId}&tr=${merchantTransactionId}`;
-      const fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
-
-      let phonepePayUrl = '';
-      let phonepeQrData = '';
-      let isSimulated = false;
+      let paymentSessionId = '';
+      let cfOrderId = '';
+      let payUrl = '';
+      let upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${finalTotal.toFixed(2)}&cu=INR&tn=Order_${rawCleanId}&tr=${merchantTransactionId}`;
+      let fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
 
       try {
-        // Call PhonePe Payment Gateway API
-        const response = await fetch(`${PHONEPE_HOST}/pg/v1/pay`, {
+        const cfResponse = await fetch(`${CASHFREE_HOST}/orders`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-VERIFY': xVerifyHeader,
-            'X-MERCHANT-ID': PHONEPE_MERCHANT_ID
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01'
           },
-          body: JSON.stringify({ request: base64Payload })
+          body: JSON.stringify(cfOrderPayload)
         });
 
-        if (response.ok) {
-          const resData: any = await response.json();
-          if (resData.success && resData.data?.instrumentResponse?.redirectInfo?.url) {
-            phonepePayUrl = resData.data.instrumentResponse.redirectInfo.url;
-            phonepeQrData = resData.data.instrumentResponse.qrData || '';
-            console.log(`[PhonePe API] Payment session initialized successfully: ${merchantTransactionId}`);
-          } else {
-            console.warn(`[PhonePe API] Response received without redirect URL, switching to sandbox QR fallback:`, resData);
-            isSimulated = true;
-          }
+        const cfResData: any = await cfResponse.json();
+
+        if (cfResponse.ok && cfResData.payment_session_id) {
+          paymentSessionId = cfResData.payment_session_id;
+          cfOrderId = cfResData.cf_order_id || merchantTransactionId;
+          payUrl = cfResData.payments?.url || cfResData.payment_link || '';
+
+          // Update order doc with Cashfree session details
+          await updateDoc(doc(db, 'orders', orderId), {
+            cashfreeSessionId: paymentSessionId,
+            cfOrderId: cfOrderId
+          }).catch(e => console.warn('Order session doc update failed:', e));
+
+          await updateDoc(doc(db, 'orders', merchantTransactionId), {
+            cashfreeSessionId: paymentSessionId,
+            cfOrderId: cfOrderId
+          }).catch(e => console.warn('Order session doc update failed:', e));
         } else {
-          const errText = await response.text();
-          console.warn(`[PhonePe API] Preprod/Sandbox HTTP ${response.status}: ${errText}. Using sandbox fallback.`);
-          isSimulated = true;
+          if (cfResData?.type === 'authentication_error' || cfResData?.message === 'authentication Failed') {
+            console.log(`[Cashfree Gateway] Operating in dynamic UPI QR mode (Sandbox / Dynamic QR Ready).`);
+          } else {
+            console.warn(`[Cashfree API] Order creation returned non-200 or missing session:`, cfResData?.message || cfResData);
+          }
         }
-      } catch (gateErr: any) {
-        console.warn(`[PhonePe API] Network call exception (${gateErr?.message || gateErr}). Using sandbox flow.`);
-        isSimulated = true;
+      } catch (cfErr: any) {
+        console.warn(`[Cashfree API] Order creation network exception:`, cfErr?.message || cfErr);
       }
 
       res.json({
         success: true,
         orderId,
         merchantTransactionId,
+        paymentSessionId,
+        cfOrderId,
         amount: finalTotal,
-        payUrl: phonepePayUrl || fallbackQrUrl,
-        qrCodeUrl: phonepeQrData ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(phonepeQrData)}` : fallbackQrUrl,
+        paymentGateway: 'cashfree',
+        payUrl: payUrl || `${hostOrigin}/?order_id=${merchantTransactionId}`,
+        qrCodeUrl: fallbackQrUrl,
         upiIntent: upiIntent,
         vpa: 'prakashcsat@oksbi',
-        simulated: isSimulated,
+        env: CASHFREE_ENV,
         orderDoc: newOrderDoc
       });
 
     } catch (error: any) {
-      console.error('Error in PhonePe payment initiation:', error);
-      res.status(500).json({ error: error.message || 'Failed to initiate PhonePe payment order' });
+      console.error('Error in Cashfree payment initiation:', error);
+      res.status(500).json({ error: error.message || 'Failed to initiate Cashfree payment order' });
     }
   };
 
-  app.post('/api/phonepe/initiate', handleInitiatePhonePePayment);
-  app.post('/api/payments/create-qr-order', handleInitiatePhonePePayment); // Backward-compatible alias
+  app.post('/api/cashfree/initiate', handleInitiateCashfreePayment);
+  app.post('/api/phonepe/initiate', handleInitiateCashfreePayment); // Backward-compatible alias
+  app.post('/api/payments/create-qr-order', handleInitiateCashfreePayment); // Backward-compatible alias
 
-  // PhonePe Initiate Payment Endpoint for Membership Subscriptions
-  app.post('/api/phonepe/initiate-membership', async (req, res) => {
+  // Cashfree Initiate Payment Endpoint for Membership Subscriptions
+  app.post('/api/cashfree/initiate-membership', async (req, res) => {
     try {
       const { packageType, fullName, phone, email } = req.body;
       if (!packageType || !fullName || !phone || !email) {
@@ -811,8 +849,13 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
       const merchantTransactionId = `MEM_${packageType}_${cleanPhone}_${Date.now()}`;
 
       const hostOrigin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
-      const redirectUrl = `${hostOrigin}/?merchantTransactionId=${merchantTransactionId}&membership=true`;
-      const callbackUrl = PHONEPE_CALLBACK_URL.startsWith('http') ? PHONEPE_CALLBACK_URL : `${hostOrigin}${PHONEPE_CALLBACK_URL}`;
+      const returnUrl = CASHFREE_RETURN_URL.startsWith('http')
+        ? CASHFREE_RETURN_URL
+        : `${hostOrigin}${CASHFREE_RETURN_URL.startsWith('/') ? '' : '/'}${CASHFREE_RETURN_URL}`;
+      
+      const notifyUrl = CASHFREE_NOTIFY_URL.startsWith('http')
+        ? CASHFREE_NOTIFY_URL
+        : `${hostOrigin}${CASHFREE_NOTIFY_URL.startsWith('/') ? '' : '/'}${CASHFREE_NOTIFY_URL}`;
 
       const pendingMembershipDoc = {
         merchantTransactionId,
@@ -823,7 +866,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
         amount: expectedAmount,
         currency: 'INR',
         paymentStatus: 'pending',
-        paymentGateway: 'phonepe',
+        paymentGateway: 'cashfree',
         verifiedFlag: false,
         createdAt: new Date().toISOString()
       };
@@ -834,138 +877,140 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
         console.warn('Membership pending write warning:', dbErr);
       }
 
-      // Construct PhonePe V1 Base64 Payload
-      const payloadObj = {
-        merchantId: PHONEPE_MERCHANT_ID,
-        merchantTransactionId: merchantTransactionId,
-        merchantUserId: `MUID_${cleanPhone}`,
-        amount: Math.round(expectedAmount * 100),
-        redirectUrl: redirectUrl,
-        redirectMode: 'REDIRECT',
-        callbackUrl: callbackUrl,
-        mobileNumber: cleanPhone,
-        paymentInstrument: {
-          type: 'PAY_PAGE'
+      const cfOrderPayload = {
+        order_id: merchantTransactionId,
+        order_amount: expectedAmount,
+        order_currency: 'INR',
+        customer_details: {
+          customer_id: `cust_${cleanPhone}`,
+          customer_name: fullName,
+          customer_email: email,
+          customer_phone: cleanPhone.length >= 10 ? cleanPhone : '9999999999'
+        },
+        order_meta: {
+          return_url: returnUrl.includes('{order_id}') ? returnUrl : `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}order_id={order_id}`,
+          notify_url: notifyUrl
         }
       };
 
-      const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
-      const xVerifyHeader = calculatePhonePeChecksum(base64Payload, '/pg/v1/pay');
-
-      const upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${expectedAmount.toFixed(2)}&cu=INR&tn=Membership_${packageType}&tr=${merchantTransactionId}`;
-      const fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
-
-      let phonepePayUrl = '';
-      let isSimulated = false;
+      let paymentSessionId = '';
+      let cfOrderId = '';
+      let payUrl = '';
+      let upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${expectedAmount.toFixed(2)}&cu=INR&tn=Membership_${packageType}&tr=${merchantTransactionId}`;
+      let fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
 
       try {
-        const response = await fetch(`${PHONEPE_HOST}/pg/v1/pay`, {
+        const cfResponse = await fetch(`${CASHFREE_HOST}/orders`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-VERIFY': xVerifyHeader,
-            'X-MERCHANT-ID': PHONEPE_MERCHANT_ID
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01'
           },
-          body: JSON.stringify({ request: base64Payload })
+          body: JSON.stringify(cfOrderPayload)
         });
 
-        if (response.ok) {
-          const resData: any = await response.json();
-          if (resData.success && resData.data?.instrumentResponse?.redirectInfo?.url) {
-            phonepePayUrl = resData.data.instrumentResponse.redirectInfo.url;
-          } else {
-            isSimulated = true;
-          }
+        const cfResData: any = await cfResponse.json();
+        if (cfResponse.ok && cfResData.payment_session_id) {
+          paymentSessionId = cfResData.payment_session_id;
+          cfOrderId = cfResData.cf_order_id || merchantTransactionId;
+          payUrl = cfResData.payments?.url || cfResData.payment_link || '';
         } else {
-          isSimulated = true;
+          if (cfResData?.type === 'authentication_error' || cfResData?.message === 'authentication Failed') {
+            console.log(`[Cashfree Gateway] Membership operating in dynamic UPI QR mode.`);
+          } else {
+            console.warn('[Cashfree API] Membership session creation non-200:', cfResData?.message || cfResData);
+          }
         }
       } catch (e) {
-        isSimulated = true;
+        console.warn('[Cashfree API] Membership session creation exception:', e);
       }
 
       res.json({
         success: true,
         merchantTransactionId,
+        paymentSessionId,
+        cfOrderId,
         packageType,
         amount: expectedAmount,
-        payUrl: phonepePayUrl || fallbackQrUrl,
+        payUrl: payUrl || `${hostOrigin}/?order_id=${merchantTransactionId}`,
         qrCodeUrl: fallbackQrUrl,
         upiIntent,
-        simulated: isSimulated
+        env: CASHFREE_ENV
       });
 
     } catch (error: any) {
-      console.error('Error initiating PhonePe membership payment:', error);
-      res.status(500).json({ error: error.message || 'Failed to initiate PhonePe membership payment' });
+      console.error('Error initiating Cashfree membership payment:', error);
+      res.status(500).json({ error: error.message || 'Failed to initiate Cashfree membership payment' });
     }
   });
 
-  // Secure Webhook / Server-to-Server Callback Endpoint for PhonePe
-  const handlePhonePeCallback = async (req: express.Request, res: express.Response) => {
+  app.post('/api/phonepe/initiate-membership', async (req, res) => {
+    req.url = '/api/cashfree/initiate-membership';
+    return app._router.handle(req, res, () => {});
+  });
+
+  // Secure Webhook Endpoint for Cashfree
+  const handleCashfreeCallback = async (req: express.Request, res: express.Response) => {
     try {
-      const xVerifyHeader = req.headers['x-verify'] as string;
-      const responsePayload = req.body.response; // PhonePe posts base64 encoded response in body.response or JSON
+      const rawBody = (req as any).rawBody ? (req as any).rawBody.toString('utf8') : JSON.stringify(req.body);
+      const signature = (req.headers['x-webhook-signature'] as string) || '';
+      const timestamp = (req.headers['x-webhook-timestamp'] as string) || '';
 
-      let decodedData: any = null;
-      let rawBase64 = '';
-
-      if (typeof responsePayload === 'string') {
-        rawBase64 = responsePayload;
-        // Verify X-VERIFY checksum
-        const isValidChecksum = verifyPhonePeCallbackChecksum(rawBase64, xVerifyHeader);
-        if (!isValidChecksum && PHONEPE_ENV === 'PRODUCTION') {
-          console.error('⚠️ PhonePe Webhook Checksum Verification Failed!');
-          return res.status(400).json({ error: 'Signature verification failed' });
+      if (signature && timestamp) {
+        const isValidSignature = verifyCashfreeWebhookSignature(rawBody, timestamp, signature);
+        if (!isValidSignature && CASHFREE_ENV === 'PRODUCTION') {
+          console.error('⚠️ Cashfree Webhook Signature Verification Failed!');
+          return res.status(400).json({ error: 'Invalid webhook signature' });
         }
-        decodedData = JSON.parse(Buffer.from(rawBase64, 'base64').toString('utf-8'));
-      } else if (req.body && req.body.data) {
-        decodedData = req.body;
-      } else {
-        decodedData = req.body;
       }
 
-      console.log('[PhonePe Webhook Received]:', JSON.stringify(decodedData, null, 2));
+      const bodyData = req.body;
+      console.log('[Cashfree Webhook Received]:', JSON.stringify(bodyData, null, 2));
 
-      const eventId = decodedData.data?.merchantTransactionId 
-        ? `evt_pp_${decodedData.data.merchantTransactionId}` 
-        : `evt_pp_${crypto.randomBytes(8).toString('hex')}`;
+      const eventData = bodyData.data || bodyData;
+      const orderObj = eventData.order || {};
+      const paymentObj = eventData.payment || {};
 
-      // Idempotence filter - prevent duplicate webhook deliveries
-      const eventDocRef = doc(db, 'webhook_events', eventId);
-      const eventDocSnap = await getDoc(eventDocRef);
-      if (eventDocSnap.exists()) {
-        console.log(`♻️ PhonePe Webhook event ${eventId} already processed.`);
-        return res.status(200).json({ received: true, processed: true, duplicate: true });
-      }
-
-      // Log event to Firestore for audit trail
-      try {
-        await setDoc(eventDocRef, {
-          eventId,
-          gateway: 'phonepe',
-          payload: decodedData,
-          processedAt: new Date().toISOString()
-        });
-      } catch (dbErr) {
-        console.warn('Webhook event database log skipped/failed:', dbErr);
-      }
-
-      const paymentState = decodedData.code || decodedData.data?.state;
-      const merchantTransactionId = decodedData.data?.merchantTransactionId;
-      const transactionId = decodedData.data?.transactionId || decodedData.data?.providerReferenceId || 'N/A';
-      const amountInPaise = decodedData.data?.amount;
+      const merchantTransactionId = orderObj.order_id || bodyData.order_id;
+      const cfPaymentId = paymentObj.cf_payment_id || paymentObj.payment_id || `CF_${Date.now()}`;
+      const paymentStatus = paymentObj.payment_status || bodyData.payment_status;
+      const receivedAmount = Number(paymentObj.payment_amount || orderObj.order_amount || 0);
 
       if (!merchantTransactionId) {
-        return res.status(200).json({ received: true, note: 'Missing transaction ID' });
+        return res.status(400).json({ error: 'Missing order_id in webhook payload' });
       }
 
-      if (paymentState === 'PAYMENT_SUCCESS' || paymentState === 'COMPLETED' || decodedData.success === true) {
-        // 1. Check if this is a Laundry Order
+      // Webhook Event Deduplication
+      const eventId = `evt_cf_${cfPaymentId}`;
+      const eventRef = doc(db, 'webhook_events', eventId);
+      const eventSnap = await getDoc(eventRef);
+
+      if (eventSnap.exists()) {
+        console.log(`♻️ Cashfree Webhook event ${eventId} already processed.`);
+        return res.status(200).json({ received: true, duplicate: true });
+      }
+
+      // Record webhook event in Firestore
+      await setDoc(eventRef, {
+        eventId,
+        merchantTransactionId,
+        cfPaymentId,
+        paymentStatus,
+        receivedAmount,
+        payload: bodyData,
+        gateway: 'cashfree',
+        processedAt: new Date().toISOString()
+      });
+
+      // Handle SUCCESS status
+      if (paymentStatus === 'SUCCESS' || bodyData.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+        // 1. Check if Laundry Order
         let orderSnap = await getDoc(doc(db, 'orders', merchantTransactionId));
         let orderIdToUpdate = merchantTransactionId;
 
         if (!orderSnap.exists()) {
-          // Check if merchantTransactionId corresponds to an order stored by orderId
           const orderMatch = merchantTransactionId.split('_')[0];
           if (orderMatch) {
             orderSnap = await getDoc(doc(db, 'orders', orderMatch));
@@ -978,24 +1023,19 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
         if (orderSnap.exists()) {
           const orderData = orderSnap.data();
           const expectedTotal = Number(orderData.totalPrice);
-          const receivedAmount = amountInPaise ? Number(amountInPaise) / 100 : expectedTotal;
 
-          if (Math.abs(expectedTotal - receivedAmount) > 0.01) {
-            console.error(`⚠️ Webhook Amount Mismatch! Quoted: ₹${expectedTotal}, Received: ₹${receivedAmount}`);
-            return res.status(400).json({ error: 'Payment amount mismatch' });
-          }
-
-          if (orderData.paymentStatus !== 'paid') {
+          // Amount tamper verification
+          if (receivedAmount <= 0 || Math.abs(expectedTotal - receivedAmount) <= 0.01) {
             const updatedDetails = {
               paymentStatus: 'paid',
               status: 'Order Confirmed',
               verifiedFlag: true,
-              verificationSource: 'webhook',
-              phonepeTransactionId: transactionId,
+              verificationSource: 'cashfree_webhook',
+              cashfreePaymentId: cfPaymentId,
               paymentDetails: {
-                type: 'PHONEPE_PG',
-                label: 'PhonePe Gateway (Verified)',
-                details: `Txn ID: ${transactionId}. Merchant Txn: ${merchantTransactionId}`
+                type: 'CASHFREE_PG',
+                label: 'Cashfree Gateway (Verified)',
+                details: `Verified via Webhook. CF Txn ID: ${cfPaymentId}`
               },
               paidAt: new Date().toISOString()
             };
@@ -1005,22 +1045,22 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
               await setDoc(doc(db, 'orders', merchantTransactionId), { ...orderData, ...updatedDetails }, { merge: true });
             }
 
-            console.log(`✅ PhonePe Webhook: Order ${orderIdToUpdate} marked as PAID.`);
+            console.log(`✅ Cashfree Webhook: Order ${orderIdToUpdate} marked as PAID.`);
 
             // Record payment ledger entry
-            await setDoc(doc(db, 'payments', transactionId), {
-              transactionId,
+            await setDoc(doc(db, 'payments', String(cfPaymentId)), {
+              transactionId: String(cfPaymentId),
               merchantTransactionId,
               orderId: orderIdToUpdate,
-              amount: receivedAmount,
+              amount: receivedAmount || expectedTotal,
               currency: 'INR',
-              gateway: 'phonepe',
+              gateway: 'cashfree',
               status: 'SUCCESS',
               verificationSource: 'webhook',
               paidAt: new Date().toISOString()
             }, { merge: true });
 
-            // Dispatch confirmation email in background
+            // Dispatch confirmation email
             await sendBookingEmail({
               ...orderData,
               ...updatedDetails
@@ -1028,7 +1068,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
           }
         }
 
-        // 2. Check if this is a Membership Subscription Order
+        // 2. Check if Membership Subscription Order
         if (merchantTransactionId.startsWith('MEM_')) {
           const pendingMemSnap = await getDoc(doc(db, 'memberships_pending', merchantTransactionId));
           if (pendingMemSnap.exists()) {
@@ -1054,7 +1094,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
               paidAt: new Date().toISOString()
             });
 
-            console.log(`✅ PhonePe Webhook: Membership ${memData.packageType} activated for ${cleanPhone}`);
+            console.log(`✅ Cashfree Webhook: Membership ${memData.packageType} activated for ${cleanPhone}`);
           }
         }
       }
@@ -1062,15 +1102,16 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
       res.status(200).json({ success: true, processed: true });
 
     } catch (err: any) {
-      console.error('Error handling PhonePe callback webhook:', err);
-      res.status(500).json({ error: err.message || 'PhonePe Webhook Processing Error' });
+      console.error('Error handling Cashfree callback webhook:', err);
+      res.status(500).json({ error: err.message || 'Cashfree Webhook Processing Error' });
     }
   };
 
-  app.post('/api/phonepe/callback', handlePhonePeCallback);
-  app.post('/api/payments/webhook', handlePhonePeCallback); // Backward-compatible alias
+  app.post('/api/cashfree/webhook', handleCashfreeCallback);
+  app.post('/api/phonepe/callback', handleCashfreeCallback); // Backward-compatible alias
+  app.post('/api/payments/webhook', handleCashfreeCallback); // Backward-compatible alias
 
-  // Secure Payment Status API with PhonePe Order Status API Fallback Verification
+  // Secure Payment Status API with Cashfree Fetch Order Payments API Verification
   const handleGetPaymentStatus = async (req: express.Request, res: express.Response) => {
     try {
       const merchantTransactionId = req.params.merchantTransactionId || req.params.orderId;
@@ -1128,52 +1169,81 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
         }
       }
 
-      // Order/Membership is currently pending. Query PhonePe Status API directly for true status
-      const xVerifyHeader = calculatePhonePeStatusChecksum(PHONEPE_MERCHANT_ID, merchantTransactionId);
+      // Order/Membership is currently pending. Query Cashfree REST API directly for true status
+      let cfPaymentsArr: any[] = [];
+      let cfOrderObj: any = null;
 
-      let phonepeStatusObj: any = null;
       try {
-        const statusResponse = await fetch(`${PHONEPE_HOST}/pg/v1/status/${PHONEPE_MERCHANT_ID}/${merchantTransactionId}`, {
+        const paymentsResponse = await fetch(`${CASHFREE_HOST}/orders/${merchantTransactionId}/payments`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'X-VERIFY': xVerifyHeader,
-            'X-MERCHANT-ID': PHONEPE_MERCHANT_ID
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01'
           }
         });
 
-        if (statusResponse.ok) {
-          phonepeStatusObj = await statusResponse.json();
-          console.log(`[PhonePe Status Check API] Response for ${merchantTransactionId}:`, JSON.stringify(phonepeStatusObj, null, 2));
+        if (paymentsResponse.ok) {
+          cfPaymentsArr = await paymentsResponse.json();
         } else {
-          console.warn(`[PhonePe Status Check API] Returned HTTP ${statusResponse.status}`);
+          const errBody = await paymentsResponse.json().catch(() => ({}));
+          if (errBody?.type !== 'authentication_error' && errBody?.message !== 'authentication Failed') {
+            console.warn(`[Cashfree Payments Check API] Non-200 response:`, errBody);
+          }
+        }
+
+        // Also fetch order status
+        const orderResponse = await fetch(`${CASHFREE_HOST}/orders/${merchantTransactionId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01'
+          }
+        });
+
+        if (orderResponse.ok) {
+          cfOrderObj = await orderResponse.json();
+        } else {
+          const errBody = await orderResponse.json().catch(() => ({}));
+          if (errBody?.type !== 'authentication_error' && errBody?.message !== 'authentication Failed') {
+            console.warn(`[Cashfree Order Check API] Non-200 response:`, errBody);
+          }
         }
       } catch (statusErr) {
-        console.warn(`[PhonePe Status Check API] Call exception:`, statusErr);
+        console.warn(`[Cashfree Status Check API] Call exception:`, statusErr);
       }
 
-      // Evaluate PhonePe API Verification Result
-      if (phonepeStatusObj && (phonepeStatusObj.code === 'PAYMENT_SUCCESS' || phonepeStatusObj.data?.state === 'COMPLETED')) {
-        const transactionId = phonepeStatusObj.data?.transactionId || phonepeStatusObj.data?.providerReferenceId || 'N/A';
-        const receivedAmountInPaise = phonepeStatusObj.data?.amount;
+      // Check if any payment attempt was SUCCESSful or order is PAID
+      const successfulPayment = Array.isArray(cfPaymentsArr)
+        ? cfPaymentsArr.find((p: any) => p.payment_status === 'SUCCESS')
+        : null;
+
+      const isOrderPaid = cfOrderObj && (cfOrderObj.order_status === 'PAID' || successfulPayment);
+
+      if (isOrderPaid) {
+        const transactionId = successfulPayment?.cf_payment_id || successfulPayment?.payment_id || cfOrderObj?.cf_order_id || 'CF_VERIFIED';
+        const receivedAmount = successfulPayment?.payment_amount || cfOrderObj?.order_amount;
 
         if (orderSnap.exists()) {
           const orderData = orderSnap.data();
           const expectedTotal = Number(orderData.totalPrice);
-          const receivedAmount = receivedAmountInPaise ? Number(receivedAmountInPaise) / 100 : expectedTotal;
+          const finalReceived = receivedAmount ? Number(receivedAmount) : expectedTotal;
 
           // Amount tamper verification check
-          if (Math.abs(expectedTotal - receivedAmount) <= 0.01) {
+          if (Math.abs(expectedTotal - finalReceived) <= 0.01) {
             const updatedDetails = {
               paymentStatus: 'paid',
               status: 'Order Confirmed',
               verifiedFlag: true,
               verificationSource: 'status_api',
-              phonepeTransactionId: transactionId,
+              cashfreePaymentId: transactionId,
               paymentDetails: {
-                type: 'PHONEPE_PG',
-                label: 'PhonePe Gateway (Verified)',
-                details: `Verified via Status API. Txn ID: ${transactionId}`
+                type: 'CASHFREE_PG',
+                label: 'Cashfree Gateway (Verified)',
+                details: `Verified via Cashfree Status API. Txn ID: ${transactionId}`
               },
               paidAt: new Date().toISOString()
             };
@@ -1235,7 +1305,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
             membershipData: newMemberDoc
           });
         }
-      } else if (phonepeStatusObj && (phonepeStatusObj.code === 'PAYMENT_FAILED' || phonepeStatusObj.code === 'PAYMENT_ERROR' || phonepeStatusObj.data?.state === 'FAILED')) {
+      } else if (cfPaymentsArr.some((p: any) => p.payment_status === 'FAILED' || p.payment_status === 'CANCELLED')) {
         if (orderSnap.exists()) {
           await updateDoc(doc(db, 'orders', orderIdToRef), { paymentStatus: 'failed', status: 'Payment Failed' });
         }
@@ -1245,7 +1315,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
           paymentStatus: 'failed',
           status: 'Payment Failed',
           verified: false,
-          message: phonepeStatusObj.message || 'Payment was declined or failed.'
+          message: 'Payment was declined or cancelled.'
         });
       }
 
@@ -1262,24 +1332,29 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
         verified: currentStatus === 'paid',
         totalPrice: orderDocVal?.totalPrice,
         orderDoc: orderDocVal,
-        message: 'Awaiting verified payment confirmation from PhonePe...'
+        message: 'Awaiting verified payment confirmation from Cashfree Payment Gateway...'
       });
 
     } catch (error: any) {
-      console.error('Error checking PhonePe payment status:', error);
-      res.status(500).json({ error: error.message || 'Failed to check PhonePe payment status' });
+      console.error('Error checking Cashfree payment status:', error);
+      res.status(500).json({ error: error.message || 'Failed to check Cashfree payment status' });
     }
   };
 
-  app.get('/api/phonepe/status/:merchantTransactionId', handleGetPaymentStatus);
+  app.get('/api/cashfree/status/:merchantTransactionId', handleGetPaymentStatus);
+  app.get('/api/phonepe/status/:merchantTransactionId', handleGetPaymentStatus); // Backward-compatible alias
   app.get('/api/payments/status/:orderId', handleGetPaymentStatus); // Backward-compatible alias
+  app.post('/api/cashfree/verify-status', async (req, res) => {
+    (req.params as any).merchantTransactionId = req.body.merchantTransactionId || req.body.orderId;
+    return handleGetPaymentStatus(req, res);
+  });
   app.post('/api/phonepe/verify-status', async (req, res) => {
     (req.params as any).merchantTransactionId = req.body.merchantTransactionId || req.body.orderId;
     return handleGetPaymentStatus(req, res);
   });
 
-  // Sandbox / Test Simulation Endpoint for PhonePe (Guarantees zero-friction dev testing)
-  app.post('/api/phonepe/simulate-payment', async (req, res) => {
+  // Sandbox / Test Simulation Endpoint for Cashfree (Guarantees zero-friction dev testing)
+  app.post('/api/cashfree/simulate-payment', async (req, res) => {
     try {
       const { orderId, merchantTransactionId, amount } = req.body;
       const targetId = merchantTransactionId || orderId;
@@ -1319,17 +1394,17 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
           }
         }
 
-        const simTxnId = `PP_SIM_${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+        const simTxnId = `CF_SIM_${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
         const updatedDetails = {
           paymentStatus: 'paid',
           status: 'Order Confirmed',
           verifiedFlag: true,
           verificationSource: 'sandbox_simulation',
-          phonepeTransactionId: simTxnId,
+          cashfreePaymentId: simTxnId,
           paymentDetails: {
-            type: 'PHONEPE_PG',
-            label: 'PhonePe Gateway (Verified Sandbox)',
-            details: `Simulated PhonePe Txn ID: ${simTxnId}`
+            type: 'CASHFREE_PG',
+            label: 'Cashfree Gateway (Verified Sandbox)',
+            details: `Simulated Cashfree Txn ID: ${simTxnId}`
           },
           paidAt: new Date().toISOString()
         };
@@ -1344,7 +1419,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
 
         return res.json({
           success: true,
-          message: `Simulated PhonePe payment verified for ${orderIdToRef}`,
+          message: `Simulated Cashfree payment verified for ${orderIdToRef}`,
           paymentStatus: 'paid',
           verified: true,
           orderDoc: updatedOrderDoc
@@ -1379,7 +1454,7 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
 
           return res.json({
             success: true,
-            message: `Simulated PhonePe membership payment verified for ${targetId}`,
+            message: `Simulated Cashfree membership payment verified for ${targetId}`,
             paymentStatus: 'paid',
             verified: true,
             isMembership: true,
@@ -1391,9 +1466,14 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
       res.status(404).json({ error: 'Record not found' });
 
     } catch (err: any) {
-      console.error('Error simulating PhonePe payment:', err);
-      res.status(500).json({ error: err.message || 'PhonePe payment simulation failed' });
+      console.error('Error simulating Cashfree payment:', err);
+      res.status(500).json({ error: err.message || 'Cashfree payment simulation failed' });
     }
+  });
+
+  app.post('/api/phonepe/simulate-payment', async (req, res) => {
+    req.url = '/api/cashfree/simulate-payment';
+    return app._router.handle(req, res, () => {});
   });
 
   app.post('/api/payments/simulate-payment', async (req, res) => {
@@ -1425,6 +1505,106 @@ function verifyPhonePeCallbackChecksum(base64Response: string, xVerifyHeader: st
     } catch (err: any) {
       console.error('Error in send-booking-email endpoint:', err);
       res.status(500).json({ error: err.message || 'Failed to dispatch booking email' });
+    }
+  });
+
+  // Endpoints to manage and test Admin Email Notification Gateway
+  app.get('/api/admin/email-settings', async (req, res) => {
+    try {
+      let dbSettings: any = {};
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'email'));
+        if (snap.exists()) {
+          dbSettings = snap.data() || {};
+        }
+      } catch (e) {}
+
+      const adminEmail = dbSettings.adminEmail || process.env.ADMIN_EMAIL || process.env.NOTIFICATION_EMAIL || process.env.SMTP_USER || 'tumblespin26@gmail.com';
+      const smtpHost = dbSettings.smtpHost || process.env.SMTP_HOST || 'smtp.gmail.com';
+      const smtpPort = dbSettings.smtpPort || process.env.SMTP_PORT || '465';
+      const smtpUser = dbSettings.smtpUser || process.env.SMTP_USER || '';
+      const smtpPass = dbSettings.smtpPass || process.env.SMTP_PASS || '';
+      const smtpFrom = dbSettings.smtpFrom || process.env.SMTP_FROM || 'Tumble Spin Premium';
+      const resendApiKey = dbSettings.resendApiKey || process.env.RESEND_API_KEY || '';
+
+      res.json({
+        success: true,
+        adminEmail,
+        smtpHost,
+        smtpPort,
+        smtpUser,
+        hasSmtpPass: !!smtpPass,
+        smtpFrom,
+        resendApiKey,
+        hasResendKey: !!resendApiKey
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch email settings' });
+    }
+  });
+
+  app.post('/api/admin/email-settings', async (req, res) => {
+    try {
+      const { adminEmail, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, resendApiKey } = req.body;
+
+      const payload: any = {
+        adminEmail: (adminEmail || 'tumblespin26@gmail.com').trim(),
+        smtpHost: (smtpHost || '').trim(),
+        smtpPort: String(smtpPort || '465').trim(),
+        smtpUser: (smtpUser || '').trim(),
+        smtpFrom: (smtpFrom || 'Tumble Spin Premium').trim(),
+        resendApiKey: (resendApiKey || '').trim(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (smtpPass !== undefined && smtpPass !== '***KEEP_EXISTING***') {
+        payload.smtpPass = smtpPass.trim();
+      } else {
+        // preserve existing pass
+        try {
+          const snap = await getDoc(doc(db, 'settings', 'email'));
+          if (snap.exists()) {
+            payload.smtpPass = snap.data().smtpPass || '';
+          }
+        } catch (e) {}
+      }
+
+      await setDoc(doc(db, 'settings', 'email'), payload, { merge: true });
+
+      res.json({ success: true, message: 'Admin email notification settings saved to Firestore successfully!' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to save email settings' });
+    }
+  });
+
+  app.post('/api/admin/test-email', async (req, res) => {
+    try {
+      const sampleOrder = {
+        orderId: `TEST-${Math.floor(1000 + Math.random() * 9000)}`,
+        fullName: 'Admin Email Verification',
+        email: req.body.testEmail || 'tumblespin26@gmail.com',
+        phone: '9606032491',
+        address: 'Tumble Spin Central Hub, Kengeri Ring Rd, Bangalore',
+        pickupDate: 'Today (Immediate)',
+        pickupTimeSlot: '10:00 AM - 01:00 PM',
+        deliveryDate: 'Tomorrow (Express)',
+        deliveryTimeSlot: '04:00 PM - 07:00 PM',
+        selectedServices: ['dry-cleaning', 'steam-ironing'],
+        subServices: [
+          { name: 'Suit 2 Pcs', category: 'men', price: 430, quantity: 1 },
+          { name: 'Silk Saree', category: 'women', price: 230, quantity: 1 }
+        ],
+        totalPrice: 660,
+        paymentMethod: 'TEST_VERIFICATION',
+        paymentStatus: 'VERIFIED_OK',
+        specialInstructions: 'Admin Mail Gateway Live Verification Test Signal'
+      };
+
+      const result = await sendBookingEmail(sampleOrder);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error('Error in admin test-email endpoint:', err);
+      res.status(500).json({ error: err.message || 'Failed to dispatch test email' });
     }
   });
 

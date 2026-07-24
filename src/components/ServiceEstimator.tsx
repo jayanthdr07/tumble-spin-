@@ -375,7 +375,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                   cart.map((item, idx) => (
                     <motion.div
                       layout
-                      key={`${item.id}-${item.serviceType}-${idx}`}
+                      key={`cart-item-${item.id}-${item.serviceType}-${idx}`}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}

@@ -248,7 +248,7 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
                   <div className="sm:col-span-6">Garment / Item</div>
                   {selectedCategory.columns.map((col, idx) => (
                     <div 
-                      key={`${col}-${idx}`} 
+                      key={`price-col-${col}-${idx}`} 
                       className={`text-right ${
                         selectedCategory.columns.length === 1 ? 'sm:col-span-6' : 'sm:col-span-3'
                       }`}
@@ -262,7 +262,7 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
                 <div className="divide-y divide-slate-100 dark:divide-brand-teal/5">
                   {selectedCategory.items.map((item, idx) => (
                     <div 
-                      key={`${item.name}-${idx}`} 
+                      key={`price-item-${item.name}-${idx}`} 
                       className="grid grid-cols-1 sm:grid-cols-12 items-center py-4 sm:py-3.5 group transition-colors"
                     >
                       {/* Name */}

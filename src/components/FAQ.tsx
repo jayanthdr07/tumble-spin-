@@ -275,7 +275,7 @@ export default function FAQ() {
                 const catName = categories.find(c => c.id === faq.category)?.name || '';
                 return (
                   <div
-                    key={`${faq.id}-${idx}`}
+                    key={`faq-item-${faq.id}-${idx}`}
                     className="rounded-2xl border border-slate-100 bg-white shadow-xs dark:bg-brand-dark dark:border-brand-teal/10 overflow-hidden transition-all duration-300 hover:border-slate-200 dark:hover:border-brand-accent/20"
                   >
                     {/* Header Toggle button */}

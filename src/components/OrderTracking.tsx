@@ -546,7 +546,7 @@ export default function OrderTracking() {
 
                     <div className="relative border-l-2 border-slate-100 dark:border-brand-teal/10 ml-3 pl-6 space-y-6">
                       {searchedOrder.timeline && searchedOrder.timeline.map((step, idx) => (
-                        <div key={`${step.step || idx}-${step.title || 'step'}-${idx}`} className="relative">
+                        <div key={`tl-step-${searchedOrder.orderId || 'track'}-${idx}`} className="relative">
                           {/* Dot indicator */}
                           <span className={`absolute -left-[31px] top-1.5 flex h-4 w-4 items-center justify-center rounded-full border-2 ${
                             step.done 
@@ -620,7 +620,7 @@ export default function OrderTracking() {
                           <p className="text-[10px] uppercase font-mono font-bold text-slate-400 tracking-wider">Garments Vetted</p>
                           <div className="space-y-1.5 mt-1.5">
                             {searchedOrder.subServices && searchedOrder.subServices.map((sub, sidx) => (
-                              <div key={`${sub.id || sub.name}-${sidx}`} className="flex justify-between text-[11px] text-slate-600 dark:text-slate-300">
+                              <div key={`track-sub-${searchedOrder.orderId || 'track'}-${sub.id || sub.name || sidx}-${sidx}`} className="flex justify-between text-[11px] text-slate-600 dark:text-slate-300">
                                 <span>{sub.name} (x{sub.quantity})</span>
                                 <span className="font-mono text-[10px]">₹{sub.price * sub.quantity}</span>
                               </div>
