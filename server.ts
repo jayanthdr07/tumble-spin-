@@ -220,7 +220,7 @@ function isValidRealEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lower);
 }
 
-// Helper to send a beautifully formatted email notification upon successful booking
+// Helper to send a beautifully formatted email notification upon successful booking or payment
 async function sendBookingEmail(orderData: any) {
   // 0. Fetch stored Firestore email settings if available
   let dbEmailSettings: any = {};
@@ -234,7 +234,7 @@ async function sendBookingEmail(orderData: any) {
   }
 
   const recipientEmail = dbEmailSettings.adminEmail || process.env.ADMIN_EMAIL || process.env.NOTIFICATION_EMAIL || process.env.SMTP_USER || 'tumblespin26@gmail.com';
-  const userEmail = orderData.email || '';
+  const userEmail = (orderData.email || '').trim();
 
   let smtpHost = dbEmailSettings.smtpHost || process.env.SMTP_HOST || '';
   let smtpPort = parseInt(dbEmailSettings.smtpPort || process.env.SMTP_PORT || '0', 10);
@@ -270,9 +270,11 @@ async function sendBookingEmail(orderData: any) {
 
   const customerName = orderData.fullName || 'Tumble Spin Customer';
 
-  // 1. Compute Resend Sender Base and From Address
+  // Compute Resend Sender Address
   let resendSenderBase = 'onboarding@resend.dev';
-  if (process.env.RESEND_FROM && process.env.RESEND_FROM.includes('@')) {
+  if (dbEmailSettings.resendFrom && dbEmailSettings.resendFrom.includes('@')) {
+    resendSenderBase = dbEmailSettings.resendFrom.trim();
+  } else if (process.env.RESEND_FROM && process.env.RESEND_FROM.includes('@')) {
     const match = process.env.RESEND_FROM.match(/<([^>]+)>/);
     resendSenderBase = match ? match[1].trim() : process.env.RESEND_FROM.trim();
   } else if (smtpFrom && smtpFrom.includes('@') && !smtpFrom.includes('no-reply@tumblespin.com')) {
@@ -280,14 +282,10 @@ async function sendBookingEmail(orderData: any) {
     resendSenderBase = match ? match[1].trim() : smtpFrom.trim();
   }
 
-  let resendFrom = '';
-  if (hasRealUserEmail) {
-    resendFrom = `"${customerName} (${userEmail})" <${resendSenderBase}>`;
-  } else {
-    resendFrom = `"${customerName}" <${resendSenderBase}>`;
-  }
+  // Format clean Resend From string (e.g. "Tumble Spin Laundry <onboarding@resend.dev>")
+  const resendFrom = `Tumble Spin Laundry <${resendSenderBase}>`;
 
-  // 2. Compute SMTP Sender Base and From Address
+  // Compute SMTP Sender Base and From Address
   let smtpSenderBase = smtpUser;
   if (smtpFrom && smtpFrom.includes('@')) {
     const match = smtpFrom.match(/<([^>]+)>/);
@@ -301,169 +299,174 @@ async function sendBookingEmail(orderData: any) {
     smtpSenderBase = 'no-reply@tumblespin.com';
   }
 
-  let smtpFinalFrom = '';
-  if (hasRealUserEmail) {
-    smtpFinalFrom = `"${customerName} (${userEmail})" <${smtpSenderBase}>`;
-  } else {
-    smtpFinalFrom = `"${customerName}" <${smtpSenderBase}>`;
-  }
+  const smtpFinalFrom = `Tumble Spin Laundry <${smtpSenderBase}>`;
+  const etherealFrom = `Tumble Spin Laundry <no-reply@tumblespin.com>`;
 
-  // 3. Compute Ethereal Sender From Address
-  let etherealFrom = '';
-  if (hasRealUserEmail) {
-    etherealFrom = `"${customerName} (${userEmail})" <no-reply@tumblespin.com>`;
-  } else {
-    etherealFrom = `"${customerName}" <no-reply@tumblespin.com>`;
-  }
+  console.log(`[Email Service] Triggering email dispatch for Order: ${orderData.orderId || orderData.id}...`);
+  console.log(`[Email Service] Admin Email: [${recipientEmail}] | Customer Email: [${userEmail || 'N/A'}]`);
+  console.log(`[Email Service] Resend Key Available: ${!!resendApiKey} | Resend From: [${resendFrom}]`);
 
-  console.log(`[Email Service] Attempting to send booking email for Order ${orderData.orderId}...`);
-  console.log(`[Email Service] Admin Recipient: [${recipientEmail}] | Target All: [${targetRecipients.join(', ')}]`);
-  console.log(`[Email Service] Computed Sender Headers - Resend: [${resendFrom}] | SMTP: [${smtpFinalFrom}]`);
+  // Build HTML Email Templates
+  const buildHtmlTemplate = (isCustomerView: boolean) => {
+    const orderId = orderData.orderId || orderData.id || 'N/A';
+    const totalPrice = orderData.totalPrice || orderData.amount || 0;
+    const paymentMethod = orderData.paymentMethod || orderData.paymentDetails?.label || 'Online / UPI';
+    const paymentStatus = (orderData.paymentStatus || 'paid').toUpperCase();
 
-  const subject = `✨ Tumble Spin Booking Confirmed: Order ${orderData.orderId}`;
-  
-  const itemsHtml = (orderData.subServices || []).map((item: any) => `
-    <tr style="border-bottom: 1px solid #f1f5f9;">
-      <td style="padding: 12px 8px; text-align: left; font-size: 14px; text-transform: capitalize; color: #334155;">
-        <strong>${item.name || ''}</strong>
-        <br/><span style="font-size: 11px; color: #64748b; font-family: monospace;">Category: ${item.category || ''}</span>
-      </td>
-      <td style="padding: 12px 8px; text-align: center; font-size: 14px; color: #334155;">₹${item.price}</td>
-      <td style="padding: 12px 8px; text-align: center; font-size: 14px; color: #334155;">${item.quantity}</td>
-      <td style="padding: 12px 8px; text-align: right; font-size: 14px; font-weight: bold; color: #0f172a;">₹${item.price * item.quantity}</td>
-    </tr>
-  `).join('');
+    const itemsHtml = (orderData.subServices || []).map((item: any) => `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 12px 8px; text-align: left; font-size: 14px; color: #334155;">
+          <strong>${item.name || ''}</strong>
+          ${item.category ? `<br/><span style="font-size: 11px; color: #64748b; font-family: monospace;">Category: ${item.category}</span>` : ''}
+        </td>
+        <td style="padding: 12px 8px; text-align: center; font-size: 14px; color: #334155;">₹${item.price}</td>
+        <td style="padding: 12px 8px; text-align: center; font-size: 14px; color: #334155;">${item.quantity}</td>
+        <td style="padding: 12px 8px; text-align: right; font-size: 14px; font-weight: bold; color: #0f172a;">₹${item.price * item.quantity}</td>
+      </tr>
+    `).join('');
 
-  const servicesHtml = (orderData.selectedServices || []).map((srv: string) => `
-    <span style="display: inline-block; background-color: #f0fdfa; border: 1px solid #99f6e4; color: #0d9488; font-size: 12px; font-weight: bold; padding: 4px 10px; margin: 2px; border-radius: 9999px; text-transform: uppercase;">
-      ${srv.replace('-', ' ')}
-    </span>
-  `).join('');
+    const servicesHtml = (orderData.selectedServices || []).map((srv: string) => `
+      <span style="display: inline-block; background-color: #f0fdfa; border: 1px solid #99f6e4; color: #0d9488; font-size: 12px; font-weight: bold; padding: 4px 10px; margin: 2px; border-radius: 9999px; text-transform: uppercase;">
+        ${srv.replace('-', ' ')}
+      </span>
+    `).join('');
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Booking Confirmed - Tumble Spin</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.02); border: 1px solid #e2e8f0; }
-        .header { background: linear-gradient(135deg, #1e1b4b 0%, #2e1065 100%); padding: 32px; text-align: center; color: #ffffff; }
-        .logo { font-size: 28px; font-weight: 900; letter-spacing: -0.025em; color: #ffffff; text-decoration: none; font-family: "Georgia", serif; }
-        .logo span { color: #2dd4bf; }
-        .badge { display: inline-block; background-color: rgba(45, 212, 191, 0.15); border: 1px solid rgba(45, 212, 191, 0.3); color: #2dd4bf; font-size: 12px; font-weight: bold; padding: 6px 16px; border-radius: 9999px; text-transform: uppercase; margin-top: 12px; letter-spacing: 0.05em; }
-        .content { padding: 32px; }
-        .section-title { font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 12px; border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; }
-        .grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-bottom: 24px; }
-        .col { flex: 1; min-width: 250px; margin-bottom: 16px; }
-        .label { font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
-        .value { font-size: 14px; color: #0f172a; font-weight: 600; }
-        .table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 24px; }
-        .table th { background-color: #f8fafc; padding: 10px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: bold; border-bottom: 2px solid #e2e8f0; }
-        .footer { background-color: #f8fafc; padding: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
-        .total-box { background-color: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 12px; padding: 16px; margin-top: 16px; text-align: right; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <div class="logo">Tumble<span>Spin</span></div>
-          <div class="badge">Booking Confirmed</div>
-          <p style="margin: 8px 0 0; opacity: 0.85; font-size: 14px;">Order ID: ${orderData.orderId}</p>
-        </div>
-        <div class="content">
-          <p style="font-size: 16px; line-height: 1.6; margin-top: 0; margin-bottom: 24px; color: #334155;">
-            Dear Owner, new booking from <strong>${orderData.fullName}</strong>,
-            <br/><br/>
-            A premium garment care order has been successfully scheduled on Tumble Spin. Below is the detailed booking summary, customer information, and service schedule.
-          </p>
+    const badgeText = isCustomerView ? 'Booking & Payment Confirmed' : '⚡ Verified Order Alert';
+    const introMessage = isCustomerView
+      ? `Dear <strong>${customerName}</strong>,<br/><br/>Thank you for choosing Tumble Spin Laundry! Your payment of <strong>₹${totalPrice}</strong> has been verified successfully. Below are your booking, schedule, and service details.`
+      : `Hello <strong>Admin</strong>,<br/><br/>A new verified order/payment has been processed. Order <strong>${orderId}</strong> for <strong>₹${totalPrice}</strong> is marked as PAID. Details below:`;
 
-          <div class="section-title">Schedule & Logistics</div>
-          <div class="grid">
-            <div class="col">
-              <div class="label">📅 Pickup Window</div>
-              <div class="value">${orderData.pickupDate}</div>
-              <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Slot: ${orderData.pickupTimeSlot}</div>
-            </div>
-            <div class="col">
-              <div class="label">🚚 Delivery Window</div>
-              <div class="value">${orderData.deliveryDate}</div>
-              <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Slot: ${orderData.deliveryTimeSlot}</div>
-            </div>
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${badgeText} - Tumble Spin</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.02); border: 1px solid #e2e8f0; }
+          .header { background: linear-gradient(135deg, #1e1b4b 0%, #2e1065 100%); padding: 32px; text-align: center; color: #ffffff; }
+          .logo { font-size: 28px; font-weight: 900; letter-spacing: -0.025em; color: #ffffff; text-decoration: none; font-family: "Georgia", serif; }
+          .logo span { color: #2dd4bf; }
+          .badge { display: inline-block; background-color: rgba(45, 212, 191, 0.15); border: 1px solid rgba(45, 212, 191, 0.3); color: #2dd4bf; font-size: 12px; font-weight: bold; padding: 6px 16px; border-radius: 9999px; text-transform: uppercase; margin-top: 12px; letter-spacing: 0.05em; }
+          .content { padding: 32px; }
+          .section-title { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 12px; border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; }
+          .grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-bottom: 24px; }
+          .col { flex: 1; min-width: 240px; margin-bottom: 16px; }
+          .label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
+          .value { font-size: 14px; color: #0f172a; font-weight: 600; }
+          .table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 24px; }
+          .table th { background-color: #f8fafc; padding: 10px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: bold; border-bottom: 2px solid #e2e8f0; }
+          .footer { background-color: #f8fafc; padding: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+          .total-box { background-color: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 12px; padding: 16px; margin-top: 16px; text-align: right; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="logo">Tumble<span>Spin</span></div>
+            <div class="badge">${badgeText}</div>
+            <p style="margin: 8px 0 0; opacity: 0.85; font-size: 14px;">Order ID: ${orderId}</p>
           </div>
-
-          <div class="section-title">Customer Details</div>
-          <div class="grid" style="margin-bottom: 12px;">
-            <div class="col">
-              <div class="label">Contact</div>
-              <div class="value">${orderData.fullName}</div>
-              <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Phone: ${orderData.phone}</div>
-              <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Email: ${orderData.email}</div>
-            </div>
-            <div class="col" style="flex: 1.5;">
-              <div class="label">📍 Address</div>
-              <div class="value" style="font-size: 13px; font-weight: normal; color: #475569; line-height: 1.4;">${orderData.address}</div>
-            </div>
-          </div>
-
-          <div class="section-title">Selected Services</div>
-          <div style="margin-bottom: 24px; padding: 4px 0;">
-            ${servicesHtml || '<span style="color:#64748b; font-size:13px;">Standard Care</span>'}
-          </div>
-
-          ${itemsHtml ? `
-            <div class="section-title">Itemized Summary</div>
-            <table class="table">
-              <thead>
-                <tr>
-                  <th style="text-align: left;">Garment Item</th>
-                  <th style="text-align: center; width: 80px;">Rate</th>
-                  <th style="text-align: center; width: 60px;">Qty</th>
-                  <th style="text-align: right; width: 90px;">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itemsHtml}
-              </tbody>
-            </table>
-          ` : ''}
-
-          <div class="total-box">
-            <span style="font-size: 13px; font-weight: bold; color: #0d9488; text-transform: uppercase; margin-right: 8px;">Grand Total Paid / Due:</span>
-            <span style="font-size: 22px; font-weight: 900; color: #0f172a;">₹${orderData.totalPrice}</span>
-            <br/>
-            <span style="font-size: 11px; color: #0d9488; font-weight: bold;">[${orderData.paymentMethod || 'UPI'}] • Status: ${orderData.paymentStatus || 'Paid'}</span>
-          </div>
-
-          ${orderData.specialInstructions ? `
-            <div class="section-title" style="margin-top: 24px;">Special Instructions</div>
-            <p style="font-size: 13px; color: #475569; background-color: #f8fafc; border-left: 3px solid #cbd5e1; padding: 10px 14px; margin: 0; font-style: italic;">
-              "${orderData.specialInstructions}"
+          <div class="content">
+            <p style="font-size: 15px; line-height: 1.6; margin-top: 0; margin-bottom: 24px; color: #334155;">
+              ${introMessage}
             </p>
-          ` : ''}
+
+            <div class="section-title">Schedule & Logistics</div>
+            <div class="grid">
+              <div class="col">
+                <div class="label">📅 Pickup Window</div>
+                <div class="value">${orderData.pickupDate || 'Scheduled'}</div>
+                <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Slot: ${orderData.pickupTimeSlot || 'Standard'}</div>
+              </div>
+              <div class="col">
+                <div class="label">🚚 Delivery Window</div>
+                <div class="value">${orderData.deliveryDate || 'Scheduled'}</div>
+                <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Slot: ${orderData.deliveryTimeSlot || 'Standard'}</div>
+              </div>
+            </div>
+
+            <div class="section-title">Customer Details</div>
+            <div class="grid" style="margin-bottom: 12px;">
+              <div class="col">
+                <div class="label">Contact</div>
+                <div class="value">${customerName}</div>
+                <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Phone: ${orderData.phone || 'N/A'}</div>
+                <div class="value" style="font-size: 13px; font-weight: normal; color: #475569;">Email: ${userEmail || 'N/A'}</div>
+              </div>
+              <div class="col" style="flex: 1.5;">
+                <div class="label">📍 Address</div>
+                <div class="value" style="font-size: 13px; font-weight: normal; color: #475569; line-height: 1.4;">${orderData.address || 'N/A'}</div>
+              </div>
+            </div>
+
+            ${servicesHtml ? `
+              <div class="section-title">Selected Services</div>
+              <div style="margin-bottom: 24px; padding: 4px 0;">
+                ${servicesHtml}
+              </div>
+            ` : ''}
+
+            ${itemsHtml ? `
+              <div class="section-title">Itemized Summary</div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Garment Item</th>
+                    <th style="text-align: center; width: 80px;">Rate</th>
+                    <th style="text-align: center; width: 60px;">Qty</th>
+                    <th style="text-align: right; width: 90px;">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml}
+                </tbody>
+              </table>
+            ` : ''}
+
+            <div class="total-box">
+              <span style="font-size: 13px; font-weight: bold; color: #0d9488; text-transform: uppercase; margin-right: 8px;">Total Paid:</span>
+              <span style="font-size: 22px; font-weight: 900; color: #0f172a;">₹${totalPrice}</span>
+              <br/>
+              <span style="font-size: 11px; color: #0d9488; font-weight: bold;">[${paymentMethod}] • Status: ${paymentStatus}</span>
+            </div>
+
+            ${orderData.specialInstructions ? `
+              <div class="section-title" style="margin-top: 24px;">Special Instructions</div>
+              <p style="font-size: 13px; color: #475569; background-color: #f8fafc; border-left: 3px solid #cbd5e1; padding: 10px 14px; margin: 0; font-style: italic;">
+                "${orderData.specialInstructions}"
+              </p>
+            ` : ''}
+          </div>
+          <div class="footer">
+            <p style="margin: 0; font-weight: bold; color: #334155;">Tumble Spin Premium Laundry & Garment Care</p>
+            <p style="margin: 4px 0 0; color: #94a3b8;">Kengeri Ring Rd (Central Hub), Bangalore, Karnataka</p>
+            <p style="margin: 12px 0 0; color: #cbd5e1;">© 2026 Tumble Spin. All rights reserved.</p>
+          </div>
         </div>
-        <div class="footer">
-          <p style="margin: 0; font-weight: bold; color: #334155;">Tumble Spin Premium Laundry & Garment Care</p>
-          <p style="margin: 4px 0 0; color: #94a3b8;">Kengeri Ring Rd (Central Hub), Bangalore, Karnataka</p>
-          <p style="margin: 12px 0 0; color: #cbd5e1;">© 2026 Tumble Spin. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
+      </body>
+      </html>
+    `;
+  };
+
+  const adminSubject = `⚡ Verified Order Alert #${orderData.orderId || orderData.id || 'NEW'} (₹${orderData.totalPrice || orderData.amount || 0})`;
+  const customerSubject = `✨ Order Confirmed! #${orderData.orderId || orderData.id || 'NEW'} - Tumble Spin`;
+
+  const adminHtml = buildHtmlTemplate(false);
+  const customerHtml = buildHtmlTemplate(true);
 
   let info: any = null;
   let usedMethod = '';
   let etherealUrl = '';
 
-  // 1. Try Resend if configured
+  // 1. Try Resend API if credentials available
   if (resendApiKey) {
     try {
-      usedMethod = 'Resend';
+      usedMethod = 'Resend API';
       const emailPromises = [];
 
-      // Send to Admin recipient
+      // A. Send to Admin recipient
       emailPromises.push(
         fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -473,19 +476,21 @@ async function sendBookingEmail(orderData: any) {
           },
           body: JSON.stringify({
             from: resendFrom,
-            reply_to: hasRealUserEmail ? userEmail : undefined,
+            reply_to: hasRealUserEmail ? userEmail : recipientEmail,
             to: [recipientEmail],
-            subject: subject,
-            html: htmlContent
+            subject: adminSubject,
+            html: adminHtml
           })
         }).then(async (r) => {
           const data = await r.json();
-          console.log('[Email Service] Admin email sent via Resend API:', data);
+          console.log('✅ [Resend API] Admin email sent successfully:', data);
           if (!info) info = data;
+        }).catch(err => {
+          console.error('❌ [Resend API] Admin email dispatch failed:', err);
         })
       );
 
-      // Send to Customer recipient if user email is present
+      // B. Send to Customer recipient (if valid email provided)
       if (hasRealUserEmail && userEmail.toLowerCase() !== recipientEmail.toLowerCase()) {
         emailPromises.push(
           fetch('https://api.resend.com/emails', {
@@ -498,25 +503,25 @@ async function sendBookingEmail(orderData: any) {
               from: resendFrom,
               reply_to: recipientEmail,
               to: [userEmail],
-              subject: subject,
-              html: htmlContent
+              subject: customerSubject,
+              html: customerHtml
             })
           }).then(async (r) => {
             const data = await r.json();
-            console.log('[Email Service] Customer confirmation email sent via Resend API:', data);
+            console.log('✅ [Resend API] Customer confirmation email sent successfully:', data);
           }).catch(err => {
-            console.warn('[Email Service] Customer Resend email dispatch warning:', err);
+            console.error('❌ [Resend API] Customer email dispatch failed:', err);
           })
         );
       }
 
       await Promise.all(emailPromises);
     } catch (resendErr) {
-      console.error('[Email Service] Resend API failed, trying SMTP fallback:', resendErr);
+      console.error('⚠️ [Email Service] Resend API execution error, falling back:', resendErr);
     }
   }
 
-  // 2. Try Custom SMTP if configured
+  // 2. Try Custom SMTP fallback if Resend was not used/failed
   if (!info && smtpHost && smtpUser && smtpPass) {
     try {
       usedMethod = 'SMTP';
@@ -532,23 +537,38 @@ async function sendBookingEmail(orderData: any) {
 
       const emailPromises = [];
 
-      // Send to targetRecipients
+      // Send Admin Email
       emailPromises.push(
         transporter.sendMail({
           from: smtpFinalFrom,
-          replyTo: hasRealUserEmail ? userEmail : undefined,
-          to: targetRecipients.join(', '),
-          subject: subject,
-          html: htmlContent
+          replyTo: hasRealUserEmail ? userEmail : recipientEmail,
+          to: recipientEmail,
+          subject: adminSubject,
+          html: adminHtml
         }).then(res => {
-          info = res;
-          console.log('[Email Service] Primary email sent via SMTP:', res.messageId);
+          if (!info) info = res;
+          console.log('✅ [SMTP Service] Admin email sent via SMTP:', res.messageId);
         })
       );
 
+      // Send Customer Email
+      if (hasRealUserEmail && userEmail.toLowerCase() !== recipientEmail.toLowerCase()) {
+        emailPromises.push(
+          transporter.sendMail({
+            from: smtpFinalFrom,
+            replyTo: recipientEmail,
+            to: userEmail,
+            subject: customerSubject,
+            html: customerHtml
+          }).then(res => {
+            console.log('✅ [SMTP Service] Customer confirmation email sent via SMTP:', res.messageId);
+          })
+        );
+      }
+
       await Promise.all(emailPromises);
     } catch (smtpErr) {
-      console.error('[Email Service] SMTP configuration failed, trying Ethereal fallback:', smtpErr);
+      console.error('⚠️ [Email Service] SMTP dispatch failed, falling back to Ethereal:', smtpErr);
     }
   }
 
@@ -556,7 +576,7 @@ async function sendBookingEmail(orderData: any) {
   if (!info) {
     try {
       usedMethod = 'Ethereal Sandbox';
-      console.log('[Email Service] No production SMTP or Resend credentials configured. Initializing Nodemailer Ethereal Sandbox account...');
+      console.log('[Email Service] Initializing Ethereal Sandbox for email dispatch...');
       const testAccount = await nodemailer.createTestAccount();
       
       const transporter = nodemailer.createTransport({
@@ -571,28 +591,23 @@ async function sendBookingEmail(orderData: any) {
 
       const emailPromises = [];
 
-      // Send to targetRecipients
       emailPromises.push(
         transporter.sendMail({
           from: etherealFrom,
-          replyTo: hasRealUserEmail ? userEmail : undefined,
+          replyTo: hasRealUserEmail ? userEmail : recipientEmail,
           to: targetRecipients.join(', '),
-          subject: subject,
-          html: htmlContent
+          subject: customerSubject,
+          html: customerHtml
         }).then(res => {
           info = res;
           etherealUrl = nodemailer.getTestMessageUrl(res) || '';
-          console.log('------------------------------------------------------------');
-          console.log(`✉️ [Email Service] Real email content generated successfully!`);
-          console.log(`📬 Primary sent to: ${targetRecipients.join(', ')}`);
-          console.log(`🔗 Ethereal Sandbox Mail Link: ${etherealUrl}`);
-          console.log('------------------------------------------------------------');
+          console.log(`✉️ [Email Service] Ethereal Sandbox Link: ${etherealUrl}`);
         })
       );
 
       await Promise.all(emailPromises);
     } catch (ethErr) {
-      console.error('[Email Service] Ethereal sandbox creation failed:', ethErr);
+      console.error('❌ [Email Service] Ethereal sandbox creation failed:', ethErr);
     }
   }
 
@@ -600,9 +615,10 @@ async function sendBookingEmail(orderData: any) {
     success: !!info,
     method: usedMethod,
     recipientEmail,
+    customerEmail: userEmail,
     allRecipients: targetRecipients.join(', '),
     etherealUrl,
-    messageId: info?.messageId || info?.id || ''
+    messageId: info?.id || info?.messageId || ''
   };
 }
 
@@ -1146,6 +1162,26 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
               verificationSource: 'webhook',
               paidAt: new Date().toISOString()
             });
+
+            // Dispatch confirmation email for membership
+            await sendBookingEmail({
+              orderId: merchantTransactionId,
+              fullName: memData.fullName || 'Tumble Spin Member',
+              email: memData.email,
+              phone: cleanPhone,
+              pickupDate: 'Instant Pass Activation',
+              pickupTimeSlot: 'N/A',
+              deliveryDate: 'N/A',
+              deliveryTimeSlot: 'N/A',
+              address: 'Digital Membership Club Card',
+              selectedServices: [`membership-${memData.packageType}`],
+              subServices: [
+                { name: `${memData.packageType} Membership Recharge`, category: 'Membership Pass', price: memData.amount, quantity: 1 }
+              ],
+              totalPrice: memData.amount,
+              paymentMethod: 'CASHFREE_PG',
+              paymentStatus: 'paid'
+            }).catch(err => console.error('Membership webhook email error:', err));
 
             console.log(`✅ Cashfree Webhook: Membership ${memData.packageType} activated for ${cleanPhone}`);
           }
