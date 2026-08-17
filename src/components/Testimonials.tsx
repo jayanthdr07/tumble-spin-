@@ -537,7 +537,7 @@ export default function Testimonials() {
           ) : (
             filteredReviews.map((test, index) => (
               <motion.div
-                key={`rev-item-${test.id || index}`}
+                key={`rev-item-${test.id}-${index}`}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.05 }}

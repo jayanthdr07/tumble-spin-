@@ -2050,8 +2050,8 @@ export default function AdminPanel({
                               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-bold text-slate-700 dark:border-brand-teal/10 dark:bg-brand-deep/60 dark:text-slate-300 focus:outline-hidden focus:ring-2 focus:ring-brand-primary/20 appearance-none cursor-pointer"
                             >
                               <option value="all">All Statuses</option>
-                              {STATUS_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>
+                              {STATUS_OPTIONS.map((opt, optIdx) => (
+                                <option key={`opt-status-${opt}-${optIdx}`} value={opt}>
                                   {opt}
                                 </option>
                               ))}
@@ -2396,11 +2396,11 @@ export default function AdminPanel({
                               </div>
 
                               <div className="flex flex-wrap gap-2">
-                                {STATUS_OPTIONS.map((statusOpt) => {
+                                {STATUS_OPTIONS.map((statusOpt, sIdx) => {
                                   const isCurrent = selectedOrder.status === statusOpt;
                                   return (
                                     <button
-                                      key={statusOpt}
+                                      key={`btn-status-${statusOpt}-${sIdx}`}
                                       onClick={() => handleUpdateStatus(selectedOrder.orderId, statusOpt)}
                                       className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 ${
                                         isCurrent
@@ -2530,11 +2530,11 @@ export default function AdminPanel({
                                 { name: 'Tumble Royal (Brand)', class: 'bg-linear-to-r from-brand-primary to-brand-secondary' },
                                 { name: 'Mint Emerald (Fresh)', class: 'bg-linear-to-r from-emerald-500 to-teal-600' },
                                 { name: 'Rose Velvet (Chic)', class: 'bg-linear-to-r from-rose-500 to-pink-600' }
-                              ].map((theme) => {
+                              ].map((theme, tIdx) => {
                                 const isSelected = promoBg === theme.class;
                                 return (
                                   <button
-                                    key={theme.class}
+                                    key={`theme-${theme.class}-${tIdx}`}
                                     type="button"
                                     onClick={() => setPromoBg(theme.class)}
                                     className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
@@ -2655,11 +2655,11 @@ export default function AdminPanel({
                               { mode: 'none', label: 'Standard Rates (Disabled)', desc: 'Listed prices apply' },
                               { mode: 'surcharge', label: 'Surcharge (Peak Season)', desc: 'Add percentage surcharge' },
                               { mode: 'discount', label: 'Discount (Off-Season)', desc: 'Subtract percentage' }
-                            ].map((opt) => {
+                            ].map((opt, optIdx) => {
                               const isSelected = pricingMode === opt.mode;
                               return (
                                 <button
-                                  key={opt.mode}
+                                  key={`pricing-mode-${opt.mode}-${optIdx}`}
                                   type="button"
                                   onClick={() => setPricingMode(opt.mode as any)}
                                   className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
@@ -2769,9 +2769,9 @@ export default function AdminPanel({
                               { id: 'services', label: '📋 Services' },
                               { id: 'estimator', label: '👕 Estimator' },
                               { id: 'booking', label: '📅 Booking' }
-                            ].map(tab => (
+                            ].map((tab, tabIdx) => (
                               <button
-                                key={tab.id}
+                                key={`tab-editor-${tab.id}-${tabIdx}`}
                                 type="button"
                                 onClick={() => setPriceEditorTab(tab.id as any)}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${

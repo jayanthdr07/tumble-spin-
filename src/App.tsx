@@ -188,14 +188,21 @@ export default function App() {
     // Locked to nightlight (dark mode) as requested - daylight option is disabled
   };
 
-  const handleOpenBooking = (serviceId?: string) => {
+  const [initialBookingQuantities, setInitialBookingQuantities] = useState<Record<string, number> | undefined>();
+  const [initialBookingStep, setInitialBookingStep] = useState<number | undefined>();
+
+  const handleOpenBooking = (serviceId?: string, quantities?: Record<string, number>, step?: number) => {
     setSelectedServiceId(serviceId);
+    setInitialBookingQuantities(quantities);
+    setInitialBookingStep(step);
     setIsBookingOpen(true);
   };
 
   const handleCloseBooking = () => {
     setIsBookingOpen(false);
     setSelectedServiceId(undefined);
+    setInitialBookingQuantities(undefined);
+    setInitialBookingStep(undefined);
   };
 
   return (
@@ -300,7 +307,7 @@ export default function App() {
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: [0.25, 1, 0.5, 1] }}
         >
-          <ServiceEstimator onOpenBooking={() => handleOpenBooking()} />
+          <ServiceEstimator onOpenBooking={handleOpenBooking} />
         </motion.div>
 
         {/* Before & After Restoration Gallery */}
@@ -384,6 +391,8 @@ export default function App() {
             isOpen={isBookingOpen} 
             onClose={handleCloseBooking} 
             initialServiceId={selectedServiceId}
+            initialQuantities={initialBookingQuantities}
+            initialStep={initialBookingStep}
             dynamicPricing={dynamicPricing}
           />
         )}
@@ -461,8 +470,8 @@ export default function App() {
         onUpdateDynamicPricing={handleUpdateDynamicPricing}
       />
 
-      {/* Dual Floating Contacts Button Stack */}
-      <div className="fixed bottom-6 right-6 z-[999] flex flex-col gap-3.5 items-end">
+      {/* Dual Floating Contacts Button Stack (Left-aligned) */}
+      <div className="fixed bottom-6 left-6 z-[999] flex flex-col gap-3.5 items-start">
         {/* Instagram Floating Button */}
         <a
           href="https://www.instagram.com/tumblespinofficial?igsh=MTdjNnFzZ2xxdWhpcw=="
@@ -472,7 +481,7 @@ export default function App() {
           title="Follow us on Instagram"
           id="floating-instagram-btn"
         >
-          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Follow on Instagram 📸
           </span>
           <Instagram className="h-5.5 w-5.5" />
@@ -487,7 +496,7 @@ export default function App() {
           title="Follow us on Facebook"
           id="floating-facebook-btn"
         >
-          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Follow on Facebook 👥
           </span>
           <Facebook className="h-5.5 w-5.5" />
@@ -500,7 +509,7 @@ export default function App() {
           title="Call us directly"
           id="floating-call-btn"
         >
-          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Call Tumble Spin 📞
           </span>
           <PhoneCall className="h-5.5 w-5.5 animate-bounce" />
@@ -515,7 +524,7 @@ export default function App() {
           title="Chat with us on WhatsApp"
           id="floating-whatsapp-btn"
         >
-          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Chat on WhatsApp 💬
           </span>
           <svg

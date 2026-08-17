@@ -17,6 +17,19 @@ export interface EstimatorItem {
 }
 
 export const ESTIMATOR_ITEMS: EstimatorItem[] = [
+  // Laundry / KG (First Option)
+  { id: 'laundry-wash-fold', name: 'Wash & Fold', category: 'laundry', dryCleanPrice: 95, steamIronPrice: null, unit: 'kg' },
+  { id: 'laundry-wash-iron', name: 'Wash & Steam Iron', category: 'laundry', dryCleanPrice: 129, steamIronPrice: null, unit: 'kg' },
+
+  // Kids Wear
+  { id: 'kids-shirt-tshirt', name: 'Kids Shirt / T-Shirt', category: 'kids', dryCleanPrice: 69, steamIronPrice: 30 },
+  { id: 'kids-jeans-trouser', name: 'Kids Jeans / Shorts', category: 'kids', dryCleanPrice: 69, steamIronPrice: 30 },
+  { id: 'kids-frock-dress', name: 'Kids Dress / Frock', category: 'kids', dryCleanPrice: 99, steamIronPrice: 40 },
+  { id: 'kids-uniform', name: 'Kids School Uniform (Set)', category: 'kids', dryCleanPrice: 119, steamIronPrice: 45 },
+  { id: 'kids-ethnic', name: 'Kids Kurta / Ethnic Wear', category: 'kids', dryCleanPrice: 129, steamIronPrice: 50 },
+  { id: 'kids-jacket', name: 'Kids Winter Jacket / Sweater', category: 'kids', dryCleanPrice: 129, steamIronPrice: 60 },
+  { id: 'kids-soft-toy', name: 'Kids Soft Toy / Blanket', category: 'kids', dryCleanPrice: 149, steamIronPrice: null },
+
   // Men's Wear
   { id: 'men-shirt', name: 'T-Shirt / Shirt', category: 'men', dryCleanPrice: 110, steamIronPrice: 40 },
   { id: 'men-trouser', name: 'Trouser / Jeans', category: 'men', dryCleanPrice: null, steamIronPrice: 40 },
@@ -72,14 +85,11 @@ export const ESTIMATOR_ITEMS: EstimatorItem[] = [
   { id: 'bags-leather', name: 'Leather Handbag', category: 'bags', dryCleanPrice: 855, steamIronPrice: null },
   { id: 'bags-ink', name: "Ink's Come / Ink Stain Removal Care", category: 'bags', dryCleanPrice: 265, steamIronPrice: null },
   { id: 'bags-wallet', name: 'Wallet', category: 'bags', dryCleanPrice: 295, steamIronPrice: null },
-
-  // Laundry
-  { id: 'laundry-wash-iron', name: 'Wash & Steam Iron', category: 'laundry', dryCleanPrice: 129, steamIronPrice: null, unit: 'kg' },
-  { id: 'laundry-wash-fold', name: 'Wash & Fold', category: 'laundry', dryCleanPrice: 95, steamIronPrice: null, unit: 'kg' },
 ];
 
 const CATEGORIES = [
-  { id: 'laundry', name: 'Laundry', icon: <ShoppingBag className="h-4 w-4" /> },
+  { id: 'laundry', name: 'Laundry/KG', icon: <ShoppingBag className="h-4 w-4" /> },
+  { id: 'kids', name: "Kids Wear", icon: <Scissors className="h-4 w-4" /> },
   { id: 'men', name: "Men's Wear", icon: <Shirt className="h-4 w-4" /> },
   { id: 'women', name: "Women's Wear", icon: <Scissors className="h-4 w-4" /> },
   { id: 'shoes', name: 'Shoes', icon: <Footprints className="h-4 w-4" /> },
@@ -98,7 +108,7 @@ interface CartItem {
 }
 
 interface ServiceEstimatorProps {
-  onOpenBooking: () => void;
+  onOpenBooking: (initialServiceId?: string, initialQuantities?: Record<string, number>, initialStep?: number) => void;
 }
 
 export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProps) {
@@ -231,9 +241,9 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
             
             {/* Horizontal Category Pill Scroll */}
             <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-              {CATEGORIES.map(cat => (
+              {CATEGORIES.map((cat, catIdx) => (
                 <button
-                  key={cat.id}
+                  key={`estimator-cat-${cat.id}-${catIdx}`}
                   onClick={() => setActiveCategory(cat.id)}
                   className={`flex items-center gap-2 px-4.5 py-2.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
                     activeCategory === cat.id
@@ -442,8 +452,34 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
               </div>
 
               <button
-                onClick={onOpenBooking}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-brand-primary text-white py-3.5 text-xs font-bold uppercase tracking-wider shadow-md hover:bg-brand-deep hover:-translate-y-0.5 active:translate-y-0 transition-all dark:bg-brand-accent dark:text-brand-deep dark:hover:bg-white"
+                onClick={() => {
+                  if (cart.length > 0) {
+                    const quantitiesMap: Record<string, number> = {};
+                    let primaryService = 'dry-cleaning';
+                    
+                    cart.forEach(item => {
+                      // Normalize ID mapping
+                      let key = item.id;
+                      if (key === 'laundry-wash-iron') key = 'laundry-wash-steam-iron';
+                      if (key === 'house-blanket-2' || key === 'house-blanket-1') key = 'house-blanket-double';
+                      if (key === 'shoes-sneaker' || key === 'shoes-sports') key = 'shoes-sneakers';
+                      if (key === 'shoes-suede' || key === 'shoes-boots') key = 'shoes-suede';
+                      
+                      quantitiesMap[key] = (quantitiesMap[key] || 0) + item.quantity;
+                      
+                      if (item.serviceType === 'Steam Iron') {
+                        primaryService = 'steam-iron';
+                      } else if (item.id.includes('laundry')) {
+                        primaryService = item.id.includes('iron') ? 'wash-iron' : 'wash-fold';
+                      }
+                    });
+
+                    onOpenBooking(primaryService, quantitiesMap, 2);
+                  } else {
+                    onOpenBooking(undefined, undefined, 1);
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-brand-primary text-white py-3.5 text-xs font-bold uppercase tracking-wider shadow-md hover:bg-brand-deep hover:-translate-y-0.5 active:translate-y-0 transition-all dark:bg-brand-accent dark:text-brand-deep dark:hover:bg-white cursor-pointer"
               >
                 Schedule Doorstep Pick-up
                 <ArrowRight className="h-4 w-4" />

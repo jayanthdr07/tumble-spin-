@@ -18,6 +18,8 @@ interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialServiceId?: string;
+  initialQuantities?: Record<string, number>;
+  initialStep?: number;
   initialWhatsAppMode?: boolean;
   dynamicPricing?: {
     mode: 'surcharge' | 'discount' | 'none';
@@ -61,8 +63,19 @@ const TIME_SLOT_OPTIONS = [
 ];
 
 export const SUB_SERVICES: SubService[] = [
-  // Gateway Test (₹1)
-  { id: 'test-gateway-1rs', name: '⚡ Gateway Test Item (₹1)', category: 'test', price: 1, serviceType: 'Gateway Test' },
+  // Laundry / KG (First Option)
+  { id: 'laundry-wash-fold', name: 'Wash & Fold (per kg)', category: 'laundry', price: 95, serviceType: 'Wash & Fold' },
+  { id: 'laundry-wash-steam-iron', name: 'Wash & Steam Iron (per kg)', category: 'laundry', price: 129, serviceType: 'Wash & Iron' },
+  { id: 'laundry-steam-press-kg', name: 'Steam Press Only (per kg)', category: 'laundry', price: 89, serviceType: 'Steam Iron' },
+
+  // Kids Wear
+  { id: 'kids-shirt-tshirt', name: 'Kids Shirt / T-Shirt', category: 'kids', price: 69, serviceType: 'Premium Dry Clean' },
+  { id: 'kids-jeans-trouser', name: 'Kids Jeans / Shorts', category: 'kids', price: 69, serviceType: 'Premium Dry Clean' },
+  { id: 'kids-frock-dress', name: 'Kids Dress / Frock', category: 'kids', price: 99, serviceType: 'Premium Dry Clean' },
+  { id: 'kids-uniform', name: 'Kids School Uniform (Set)', category: 'kids', price: 119, serviceType: 'Premium Dry Clean' },
+  { id: 'kids-ethnic', name: 'Kids Kurta / Ethnic Wear', category: 'kids', price: 129, serviceType: 'Premium Dry Clean' },
+  { id: 'kids-jacket', name: 'Kids Winter Jacket / Sweater', category: 'kids', price: 129, serviceType: 'Woolen Dry Clean' },
+  { id: 'kids-soft-toy', name: 'Kids Soft Toy / Blanket', category: 'kids', price: 149, serviceType: 'Household Care' },
 
   // Men's Wear
   { id: 'men-shirt', name: 'Shirt / T-Shirt', category: 'men', price: 99, serviceType: 'Premium Dry Clean' },
@@ -103,20 +116,20 @@ export const SUB_SERVICES: SubService[] = [
   { id: 'bags-backpack', name: 'Canvas / Jute Backpack', category: 'bags', price: 290, serviceType: 'Premium Restore' },
   { id: 'bags-spa-care', name: 'Handbag Lining Clean & Conditioning', category: 'bags', price: 590, serviceType: 'Spa Treatment' },
 
-  // Laundry
-  { id: 'laundry-wash-fold', name: 'Wash & Fold (per kg)', category: 'laundry', price: 95, serviceType: 'Wash & Fold' },
-  { id: 'laundry-wash-steam-iron', name: 'Wash & Steam Iron (per kg)', category: 'laundry', price: 129, serviceType: 'Wash & Iron' },
+  // Gateway Test (₹1)
+  { id: 'test-gateway-1rs', name: '⚡ Gateway Test Item (₹1)', category: 'test', price: 1, serviceType: 'Gateway Test' },
 ];
 
 const SUB_CATEGORIES = [
-  { id: 'test', name: '⚡ Test (₹1)' },
+  { id: 'laundry', name: 'Laundry/KG' },
+  { id: 'kids', name: "Kids Wear" },
   { id: 'men', name: "Men's Wear" },
   { id: 'women', name: "Women's Wear" },
   { id: 'woolens', name: 'Woolens & Coats' },
   { id: 'household', name: 'Household' },
   { id: 'shoes', name: 'Footwear' },
   { id: 'bags', name: 'Leather Bags' },
-  { id: 'laundry', name: 'Laundry/KG' }
+  { id: 'test', name: '⚡ Test (₹1)' }
 ];
 
 const safeJsonParse = async (response: Response, defaultError: string) => {
@@ -173,7 +186,15 @@ const robustFetch = async (url: string, options?: RequestInit, retries = 3, dela
   throw new Error('Network connection failed. Please check your internet connection.');
 };
 
-export default function BookingModal({ isOpen, onClose, initialServiceId, initialWhatsAppMode, dynamicPricing }: BookingModalProps) {
+export default function BookingModal({ 
+  isOpen, 
+  onClose, 
+  initialServiceId, 
+  initialQuantities,
+  initialStep,
+  initialWhatsAppMode, 
+  dynamicPricing 
+}: BookingModalProps) {
   const businessInfo = useBusinessInfo();
   const finalPaymentUrl = businessInfo.razorpayUrl || 'https://razorpay.me/@tumblespin';
 
@@ -252,7 +273,9 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
   });
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [activeSubCategory, setActiveSubCategory] = useState('men');
+  const [activeSubCategory, setActiveSubCategory] = useState('laundry');
+  const [isFromEstimator, setIsFromEstimator] = useState(false);
+  const [hasReachedReview, setHasReachedReview] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [smsOptIn, setSmsOptIn] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -268,6 +291,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
   useEffect(() => {
     if (step === 5) {
+      setHasReachedReview(true);
       const activeSub = getActiveMembership();
       if (activeSub) {
         setSelectedPaymentMethod('membership');
@@ -541,10 +565,21 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
         setStep(1);
       } else {
         setIsWhatsAppMode(false);
-        if (initialServiceId) {
+        if (initialQuantities && Object.keys(initialQuantities).length > 0) {
+          setQuantities(initialQuantities);
+          setIsFromEstimator(true);
+          if (initialServiceId) {
+            setSelectedServices([initialServiceId]);
+          } else {
+            setSelectedServices(['dry-cleaning']);
+          }
+          setStep(initialStep || 2);
+        } else if (initialServiceId) {
+          setIsFromEstimator(false);
           setSelectedServices([initialServiceId]);
-          setStep(2); // Skip step 1 and proceed directly to scheduling!
+          setStep(initialStep || 2); // Skip step 1 and proceed directly to scheduling!
         } else {
+          setIsFromEstimator(false);
           setSelectedServices([]);
           setStep(1);
         }
@@ -552,6 +587,8 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
     } else {
       // Clean up and reset everything on close so background intervals and state are fully killed
       setIsSuccess(false);
+      setIsFromEstimator(false);
+      setHasReachedReview(false);
       setPaymentStatus('idle');
       setIsSubmitting(false);
       setManualVerifyStatus('idle');
@@ -579,7 +616,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
         garmentCareOption: 'standard',
       });
     }
-  }, [initialServiceId, isOpen, initialWhatsAppMode]);
+  }, [initialServiceId, initialQuantities, initialStep, isOpen, initialWhatsAppMode]);
 
   const handleServiceToggle = (id: string) => {
     if (selectedServices.includes(id)) {
@@ -799,7 +836,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
   };
 
   const shouldSkipStep3 = () => {
-    return selectedServices.includes('hassle-free');
+    return selectedServices.includes('hassle-free') || isFromEstimator || (initialQuantities !== undefined && Object.keys(initialQuantities).length > 0);
   };
 
   const handleNextStep = () => {
@@ -885,12 +922,14 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
     const grandTotal = Number(getGrandTotal());
     const activeSub = getActiveMembership();
-    if (selectedPaymentMethod === 'cod') {
+    const isHassleFree = selectedServices.includes('hassle-free');
+
+    if (isHassleFree || selectedPaymentMethod === 'cod') {
       try {
         const clientOrderId = await generateUniqueOrderId();
 
         const orderTimeline = [
-          { step: 1, title: 'Order Confirmed', desc: 'Pickup scheduled. No upfront payment required.', time: new Date().toLocaleString(), done: true, active: true },
+          { step: 1, title: 'Order Confirmed', desc: isHassleFree ? 'Hassle-Free pickup scheduled. No upfront payment required.' : 'Pickup scheduled. No upfront payment required.', time: new Date().toLocaleString(), done: true, active: true },
           { step: 2, title: 'Valet Pickup Completed', desc: 'Arjun Gowda is arriving for doorstep garment collection.', time: 'Scheduled', done: false, active: false },
           { step: 3, title: 'In-Facility Fabric Screening', desc: 'Garments will be sorted and weighed at facility.', time: 'Pending', done: false, active: false },
           { step: 4, title: 'Quality Pressed & Inspected', desc: 'Inspected under pristine studio lighting.', time: 'Pending', done: false, active: false },
@@ -911,19 +950,26 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
           garmentCareOption: bookingDetails.garmentCareOption || 'standard',
           specialInstructions: bookingDetails.specialInstructions || '',
           selectedServices,
-          subServices: [],
+          subServices: isHassleFree ? [] : getSelectedItemsWithDetails().map(item => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            price: adjustPrice(item.price),
+            quantity: item.quantity,
+            serviceType: item.serviceType
+          })),
           totalPrice: 0,
           status: 'Confirmed',
           orderStatus: 'Pending',
           smsOptIn: smsOptIn,
           timeline: orderTimeline,
-          paymentMethod: 'Post-Weighing / Cash on Delivery',
+          paymentMethod: isHassleFree ? 'Hassle-Free Direct Pickup (Post-Weighing)' : 'Post-Weighing / Cash on Delivery',
           paymentDetails: {
             type: 'POST_PAID',
-            label: 'Post-Weighing Billing',
+            label: isHassleFree ? 'Hassle-Free Direct Pickup' : 'Post-Weighing Billing',
             details: 'To be billed after valet collection and weight measurement.'
           },
-          paymentStatus: 'pending',
+          paymentStatus: 'postpaid',
           createdAt: new Date().toISOString()
         };
 
@@ -1523,21 +1569,39 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
             {/* Step Progress Indicators */}
             {!isSuccess && !showQrPayment && (
-              <div className="px-6 py-3 bg-slate-100/50 dark:bg-brand-deep/10 border-b border-slate-100 dark:border-brand-teal/5 flex gap-1 justify-between shrink-0">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <div key={`modal-step-bar-${s}`} className="flex-1 flex flex-col gap-1">
-                    <div className={`h-1.5 rounded-full transition-colors ${
-                      step >= s 
-                        ? 'bg-brand-primary dark:bg-brand-accent' 
-                        : 'bg-slate-200 dark:bg-slate-800'
-                    }`} />
-                    <span className={`text-[9px] uppercase tracking-wider text-center font-mono ${
-                      step === s ? 'font-bold text-brand-primary dark:text-brand-accent' : 'text-slate-400'
-                    }`}>
-                      {s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}
-                    </span>
-                  </div>
-                ))}
+              <div className="px-6 py-3 bg-slate-100/50 dark:bg-brand-deep/10 border-b border-slate-100 dark:border-brand-teal/5 flex gap-1.5 justify-between shrink-0">
+                {[1, 2, 3, 4, 5].map((s, sIdx) => {
+                  const isClickable = s <= step || hasReachedReview;
+                  return (
+                    <button
+                      key={`modal-step-bar-${s}-${sIdx}`}
+                      type="button"
+                      disabled={!isClickable}
+                      onClick={() => {
+                        if (isClickable) {
+                          setStep(s);
+                        }
+                      }}
+                      className={`flex-1 flex flex-col gap-1 text-left transition-all ${
+                        isClickable 
+                          ? 'cursor-pointer hover:opacity-80' 
+                          : 'cursor-not-allowed opacity-50'
+                      }`}
+                      title={isClickable ? `Jump to Step ${s}: ${s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}` : `Step ${s}`}
+                    >
+                      <div className={`h-1.5 rounded-full transition-colors ${
+                        step >= s 
+                          ? 'bg-brand-primary dark:bg-brand-accent' 
+                          : 'bg-slate-200 dark:bg-slate-800'
+                      }`} />
+                      <span className={`text-[9px] uppercase tracking-wider text-center font-mono ${
+                        step === s ? 'font-bold text-brand-primary dark:text-brand-accent' : 'text-slate-400'
+                      }`}>
+                        {s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -1852,12 +1916,12 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                         Select Care Services Needed
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                        {AVAILABLE_SERVICES.filter(s => s.id !== 'express' && s.id !== 'hassle-free').map(srv => {
+                        {AVAILABLE_SERVICES.filter(s => s.id !== 'express' && s.id !== 'hassle-free').map((srv, srvIdx) => {
                           const isSelected = selectedServices.includes(srv.id);
                           return (
                             <button
                               type="button"
-                              key={`lead-srv-${srv.id}`}
+                              key={`lead-srv-${srv.id}-${srvIdx}`}
                               onClick={() => {
                                 if (isSelected) {
                                   setSelectedServices(selectedServices.filter(id => id !== srv.id));
@@ -2214,30 +2278,6 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                         </button>
                       </div>
 
-                      {/* WhatsApp Instant Booking Shortcut */}
-                      <div className="mb-5 p-4 rounded-2xl bg-[#25D366]/10 border border-[#25D366]/20 dark:border-[#25D366]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm text-left">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-base">💬</span>
-                            <h5 className="text-xs font-extrabold text-[#25D366] dark:text-[#25D366] uppercase tracking-wider">
-                              Prefer Booking via WhatsApp?
-                            </h5>
-                          </div>
-                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed font-semibold">
-                            Instantly reserve a pickup with just your Name, Address, and Phone. No calendar picking or complex steps needed!
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsWhatsAppMode(true);
-                          }}
-                          className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-[#25D366] hover:bg-[#25D366]/90 rounded-xl transition-all duration-300 shadow-md shrink-0 flex items-center gap-1.5 cursor-pointer"
-                        >
-                          ⚡ WhatsApp Booking
-                        </button>
-                      </div>
-
                       <div className="mb-4">
                         <p className="text-sm text-slate-600 dark:text-slate-300">
                           Select the cleaning modules to include in this booking. Our garment specialists will inspect each piece upon arrival to customize the cleaning treatment.
@@ -2248,11 +2288,11 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2" id="booking-services-grid">
-                        {AVAILABLE_SERVICES.map((srv) => {
+                        {AVAILABLE_SERVICES.map((srv, srvIdx) => {
                           const isSelected = selectedServices.includes(srv.id);
                           return (
                             <div
-                              key={`booking-srv-${srv.id}`}
+                              key={`booking-srv-${srv.id}-${srvIdx}`}
                               onClick={() => handleServiceToggle(srv.id)}
                               className={`relative cursor-pointer rounded-xl border p-4 transition-all duration-300 ${
                                 isSelected 
@@ -2363,12 +2403,12 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             </label>
                             
                             <div className="grid grid-cols-2 gap-2">
-                              {TIME_SLOT_OPTIONS.map((opt) => {
+                              {TIME_SLOT_OPTIONS.map((opt, optIdx) => {
                                 const isSelected = bookingDetails.pickupTimeSlot === opt.value;
                                 return (
                                   <button
                                     type="button"
-                                    key={`pickup-slot-${opt.value}`}
+                                    key={`pickup-slot-${opt.value}-${optIdx}`}
                                     onClick={() => setBookingDetails(prev => ({ ...prev, pickupTimeSlot: opt.value }))}
                                     className={`flex items-start gap-2 rounded-2xl border p-2.5 text-left transition-all cursor-pointer ${
                                       isSelected
@@ -2441,12 +2481,12 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                             </label>
                             
                             <div className="grid grid-cols-2 gap-2">
-                              {TIME_SLOT_OPTIONS.map((opt) => {
+                              {TIME_SLOT_OPTIONS.map((opt, optIdx) => {
                                 const isSelected = bookingDetails.deliveryTimeSlot === opt.value;
                                 return (
                                   <button
                                     type="button"
-                                    key={`deliv-slot-${opt.value}`}
+                                    key={`deliv-slot-${opt.value}-${optIdx}`}
                                     onClick={() => setBookingDetails(prev => ({ ...prev, deliveryTimeSlot: opt.value }))}
                                     className={`flex items-start gap-2 rounded-2xl border p-2.5 text-left transition-all cursor-pointer ${
                                       isSelected
@@ -2886,95 +2926,236 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                       animate={{ opacity: 1, x: 0 }}
                       className="space-y-5"
                     >
-                      <div className="rounded-xl border border-brand-primary/10 bg-brand-light/50 p-5 dark:border-brand-accent/10 dark:bg-brand-deep/30">
-                        <h4 className="text-sm font-semibold tracking-wider text-brand-primary uppercase dark:text-brand-accent font-mono mb-4 flex items-center gap-1.5">
-                          <ShoppingBag className="h-4.5 w-4.5" />
-                          Order Summary Profile
-                        </h4>
+                      {/* Top Review Tip Banner */}
+                      <div className="p-3.5 rounded-2xl bg-brand-primary/5 dark:bg-brand-accent/5 border border-brand-primary/15 dark:border-brand-accent/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base shrink-0">✨</span>
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Final Review: You can edit or tweak any service, garment, slot, or address at any time before confirming.
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider font-mono px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/15 dark:text-brand-accent shrink-0">
+                          Step 5 of 5
+                        </span>
+                      </div>
 
-                        <div className="space-y-3.5 text-xs text-slate-700 dark:text-slate-300">
-                          <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                            <span className="font-semibold text-slate-800 dark:text-white">Selected Care Options:</span>
-                            <div className="text-right font-medium max-w-[65%]">
-                              {selectedServices.map(id => AVAILABLE_SERVICES.find(s => s.id === id)?.name).join(', ')}
+                      <div className="rounded-2xl border border-brand-primary/10 bg-brand-light/50 p-5 dark:border-brand-accent/10 dark:bg-brand-deep/30 space-y-4">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200/70 dark:border-slate-800">
+                          <h4 className="text-sm font-bold tracking-wider text-brand-primary uppercase dark:text-brand-accent font-mono flex items-center gap-2">
+                            <ShoppingBag className="h-4.5 w-4.5" />
+                            Order Summary Profile
+                          </h4>
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            Instant Edit Enabled ✏️
+                          </span>
+                        </div>
+
+                        <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
+                          {/* 1. Care Services Section */}
+                          <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div className="space-y-1">
+                              <span className="font-bold text-slate-800 dark:text-white block">Selected Care Services:</span>
+                              <button
+                                type="button"
+                                onClick={() => setStep(1)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2 py-0.5 rounded-md transition-colors"
+                              >
+                                ✏️ Edit Services (Step 1)
+                              </button>
+                            </div>
+                            <div className="text-right font-semibold text-slate-800 dark:text-slate-200 max-w-[60%] flex flex-wrap gap-1.5 justify-end">
+                              {selectedServices.map((id, srvIdx) => {
+                                const s = AVAILABLE_SERVICES.find(item => item.id === id);
+                                return (
+                                  <span key={`summary-srv-${id}-${srvIdx}`} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-medium shadow-2xs">
+                                    {s?.name || id}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
 
-                          {/* Itemized Garments lists */}
-                          {getSelectedItemsWithDetails().length > 0 ? (
-                            <div className="border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                              <span className="font-semibold text-slate-800 dark:text-white block mb-1.5">Itemized Garments & Estimates:</span>
-                              <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                                {getSelectedItemsWithDetails().map((sub, sidx) => (
-                                  <div key={`review-sub-${sub.id || sub.name || sidx}-${sidx}`} className="flex justify-between items-center text-[11px] text-slate-600 dark:text-slate-300 py-0.5">
-                                    <span className="flex items-center gap-1.5 min-w-0">
-                                      <span className="text-brand-primary dark:text-brand-accent flex-shrink-0">
-                                        {getItemIcon(sub.id || sub.name, "h-3.5 w-3.5")}
-                                      </span>
-                                      <span className="truncate">{sub.name} (x{sub.quantity})</span>
-                                    </span>
-                                    <span className="font-mono flex-shrink-0">₹{adjustPrice(sub.price) * sub.quantity}</span>
-                                  </div>
-                                ))}
+                          {/* 2. Itemized Garments Section with Inline Quantity Stepper */}
+                          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div className="flex justify-between items-center mb-2">
+                              <div>
+                                <span className="font-bold text-slate-800 dark:text-white block">Itemized Garments & Live Estimates:</span>
+                                <span className="text-[10px] text-slate-400 dark:text-slate-500">Modify quantities directly or open full catalog</span>
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => setStep(3)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2.5 py-1 rounded-lg transition-colors"
+                              >
+                                ✏️ {getSelectedItemsWithDetails().length > 0 ? 'Edit / Add Items (Step 3)' : '+ Itemize Garments (Step 3)'}
+                              </button>
                             </div>
-                          ) : (
-                            <div className="border-b border-slate-100 dark:border-slate-800 pb-2.5 pt-1">
-                              <span className="font-semibold text-slate-800 dark:text-white block mb-1">Billing & Pricing Model:</span>
-                              {selectedServices.includes('hassle-free') ? (
-                                <div className="p-3 rounded-xl bg-brand-primary/5 border border-brand-primary/10 dark:bg-brand-accent/5 dark:border-brand-accent/15 space-y-1 text-[11px]">
-                                  <p className="font-bold text-brand-primary dark:text-brand-accent uppercase tracking-wider">⚡ Hassle-Free Direct Pickup</p>
-                                  <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                                    No itemizing or upfront payments! Your garments will be picked up, professionally sorted, counted, and weighed by our specialist team. We will send you a detailed itemized digital invoice on WhatsApp once sorted.
-                                  </p>
-                                </div>
-                              ) : selectedServices.includes('wash-fold') ? (
-                                <div className="p-3 rounded-xl bg-brand-primary/5 border border-brand-primary/10 dark:bg-brand-accent/5 dark:border-brand-accent/15 space-y-1 text-[11px]">
-                                  <p className="font-bold text-brand-primary dark:text-brand-accent uppercase tracking-wider">⚖️ Per-KG Weight Billing</p>
-                                  <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                                    You have selected Wash & Fold (₹95/kg). Since billing is based on precise weight, your garments will be weighed on our certified scales upon pickup. A direct weight-based invoice will be generated.
-                                  </p>
-                                </div>
-                              ) : selectedServices.includes('wash-iron') ? (
-                                <div className="p-3 rounded-xl bg-brand-primary/5 border border-brand-primary/10 dark:bg-brand-accent/5 dark:border-brand-accent/15 space-y-1 text-[11px]">
-                                  <p className="font-bold text-brand-primary dark:text-brand-accent uppercase tracking-wider">⚖️ Per-KG Weight Billing</p>
-                                  <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                                    You have selected Wash & Steam Iron (₹129/kg). Since billing is based on precise weight, your garments will be weighed on our certified scales upon pickup. A direct weight-based invoice will be generated.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="p-2 text-[11px] text-slate-500 italic">No garments itemized. Estimate TBD at pickup.</div>
-                              )}
-                            </div>
-                          )}
 
-                          <div className="flex justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                            <span className="font-semibold text-slate-800 dark:text-white">Valet Collection Slot:</span>
-                            <span className="font-medium">
+                            {getSelectedItemsWithDetails().length > 0 ? (
+                              <div className="space-y-2 bg-white/70 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                                  {getSelectedItemsWithDetails().map((sub, sidx) => (
+                                    <div key={`review-sub-${sub.id || sub.name || sidx}-${sidx}`} className="flex justify-between items-center text-[11px] py-1 border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                                      <span className="flex items-center gap-2 min-w-0 pr-2">
+                                        <span className="text-brand-primary dark:text-brand-accent flex-shrink-0">
+                                          {getItemIcon(sub.id || sub.name, "h-3.5 w-3.5")}
+                                        </span>
+                                        <span className="truncate font-semibold text-slate-800 dark:text-slate-200">{sub.name}</span>
+                                      </span>
+
+                                      <div className="flex items-center gap-3 flex-shrink-0">
+                                        {/* Inline Stepper for Last Moment Edits */}
+                                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(sub.id, -1)}
+                                            className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700 text-xs font-bold cursor-pointer"
+                                            title="Decrease quantity"
+                                          >
+                                            -
+                                          </button>
+                                          <span className="font-mono font-black text-[11px] px-1.5 min-w-5 text-center text-slate-800 dark:text-white">
+                                            {sub.quantity}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(sub.id, 1)}
+                                            className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700 text-xs font-bold cursor-pointer"
+                                            title="Increase quantity"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+                                        <span className="font-mono font-bold text-slate-900 dark:text-white min-w-14 text-right">
+                                          ₹{adjustPrice(sub.price) * sub.quantity}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setStep(3)}
+                                    className="text-[10px] font-bold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus className="h-3 w-3" /> Browse More Items from Wardrobe
+                                  </button>
+                                  <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                    {getSelectedItemsWithDetails().reduce((sum, item) => sum + item.quantity, 0)} items total
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {selectedServices.includes('hassle-free') ? (
+                                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] space-y-1">
+                                    <p className="font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">⚡ Hassle-Free Direct Pickup (₹0 Upfront)</p>
+                                    <p className="text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+                                      No itemizing needed! Your clothes will be picked up, professionally sorted, counted, and weighed by our specialist team. We will send you an itemized digital invoice on WhatsApp once sorted.
+                                    </p>
+                                  </div>
+                                ) : selectedServices.includes('wash-fold') ? (
+                                  <div className="p-3 rounded-xl bg-brand-primary/5 border border-brand-primary/10 dark:bg-brand-accent/5 dark:border-brand-accent/15 space-y-1 text-[11px]">
+                                    <p className="font-bold text-brand-primary dark:text-brand-accent uppercase tracking-wider">⚖️ Per-KG Weight Billing (₹95/kg)</p>
+                                    <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                                      Billing is based on precise weight upon pickup. Want to specify estimated KG or items? Click "Itemize Garments" above.
+                                    </p>
+                                  </div>
+                                ) : selectedServices.includes('wash-iron') ? (
+                                  <div className="p-3 rounded-xl bg-brand-primary/5 border border-brand-primary/10 dark:bg-brand-accent/5 dark:border-brand-accent/15 space-y-1 text-[11px]">
+                                    <p className="font-bold text-brand-primary dark:text-brand-accent uppercase tracking-wider">⚖️ Per-KG Weight Billing (₹129/kg)</p>
+                                    <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                                      Billing is based on precise weight upon pickup. Want to specify estimated KG or items? Click "Itemize Garments" above.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 flex justify-between items-center">
+                                    <span>No garments itemized yet. Live estimate TBD at pickup.</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setStep(3)}
+                                      className="font-bold text-brand-primary dark:text-brand-accent hover:underline cursor-pointer"
+                                    >
+                                      + Add Garments Now
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 3. Pickup Slot Section */}
+                          <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div>
+                              <span className="font-bold text-slate-800 dark:text-white block">Valet Collection Slot:</span>
+                              <button
+                                type="button"
+                                onClick={() => setStep(2)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2 py-0.5 rounded-md mt-0.5 transition-colors"
+                              >
+                                ✏️ Edit Pickup Slot (Step 2)
+                              </button>
+                            </div>
+                            <span className="font-semibold text-right text-slate-800 dark:text-slate-200">
                               {formatDate(bookingDetails.pickupDate || '')} @ {bookingDetails.pickupTimeSlot}
                             </span>
                           </div>
 
-                          <div className="flex justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                            <span className="font-semibold text-slate-800 dark:text-white">Fresh Return Delivery Slot:</span>
-                            <span className="font-medium">
+                          {/* 4. Delivery Slot Section */}
+                          <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div>
+                              <span className="font-bold text-slate-800 dark:text-white block">Fresh Return Delivery Slot:</span>
+                              <button
+                                type="button"
+                                onClick={() => setStep(2)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2 py-0.5 rounded-md mt-0.5 transition-colors"
+                              >
+                                ✏️ Edit Delivery Slot (Step 2)
+                              </button>
+                            </div>
+                            <span className="font-semibold text-right text-slate-800 dark:text-slate-200">
                               {formatDate(bookingDetails.deliveryDate || '')} @ {bookingDetails.deliveryTimeSlot}
                             </span>
                           </div>
 
-                          <div className="flex justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                            <span className="font-semibold text-slate-800 dark:text-white">Delivery Location:</span>
-                            <span className="font-medium text-right max-w-[60%] truncate" title={bookingDetails.address}>
-                              {bookingDetails.address}
-                            </span>
+                          {/* 5. Address & Customer Section */}
+                          <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div>
+                              <span className="font-bold text-slate-800 dark:text-white block">Delivery Location & Contact:</span>
+                              <button
+                                type="button"
+                                onClick={() => setStep(4)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2 py-0.5 rounded-md mt-0.5 transition-colors"
+                              >
+                                ✏️ Edit Address & Phone (Step 4)
+                              </button>
+                            </div>
+                            <div className="text-right max-w-[60%]">
+                              <p className="font-semibold text-slate-900 dark:text-white">{bookingDetails.fullName} (+91 {bookingDetails.phone})</p>
+                              <p className="font-medium text-slate-500 dark:text-slate-400 truncate text-[11px]" title={bookingDetails.address}>
+                                {bookingDetails.address}
+                              </p>
+                            </div>
                           </div>
 
-                          <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                            <span className="font-semibold text-slate-800 dark:text-white flex items-center gap-1">
-                              <Heart className="h-4 w-4 text-rose-500 fill-rose-500 animate-pulse" />
-                              Fibers and Organic Care:
-                            </span>
-                            <span className="font-medium text-brand-primary dark:text-brand-accent uppercase tracking-wider font-mono">
+                          {/* 6. Fabric & Detergent Care */}
+                          <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div>
+                              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1">
+                                <Heart className="h-4 w-4 text-rose-500 fill-rose-500 animate-pulse" />
+                                Fibers and Organic Care:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setStep(4)}
+                                className="text-[10px] font-extrabold text-brand-primary dark:text-brand-accent hover:underline inline-flex items-center gap-1 cursor-pointer bg-brand-primary/10 dark:bg-brand-accent/15 px-2 py-0.5 rounded-md mt-0.5 transition-colors"
+                              >
+                                ✏️ Edit Detergent (Step 4)
+                              </button>
+                            </div>
+                            <span className="font-semibold text-brand-primary dark:text-brand-accent uppercase tracking-wider font-mono text-[11px]">
                               {bookingDetails.garmentCareOption === 'standard' 
                                 ? 'Standard Luxury Detergent' 
                                 : bookingDetails.garmentCareOption === 'hypoallergenic'
@@ -3038,15 +3219,21 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
 
                           <div className="flex justify-between items-center pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 text-sm font-bold">
                             <span className="text-slate-900 dark:text-white">
-                              {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
-                                ? 'Refundable Booking Deposit:' 
-                                : 'Grand Total Projection:'}
+                              {selectedServices.includes('hassle-free')
+                                ? 'Amount Due Today:'
+                                : shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
+                                  ? 'Refundable Booking Deposit:' 
+                                  : 'Grand Total Projection:'}
                             </span>
                             <span className="text-lg font-mono text-brand-primary dark:text-brand-accent">
-                              ₹{getGrandTotal()}
+                              {selectedServices.includes('hassle-free') ? '₹0' : `₹${getGrandTotal()}`}
                             </span>
                           </div>
-                          {(shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)) && (
+                          {selectedServices.includes('hassle-free') ? (
+                            <p className="text-[10px] text-right text-emerald-600 dark:text-emerald-400 font-semibold">
+                              ✓ Hassle-Free Direct Booking: No payment needed today!
+                            </p>
+                          ) : (shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)) && (
                             <p className="text-[10px] text-right text-slate-500 dark:text-slate-400 font-medium">
                               * 100% credited against your final weighed/sorted invoice
                             </p>
@@ -3054,118 +3241,132 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                         </div>
                       </div>
 
-                      {/* Secure Payment Gateway Selector */}
-                      <div className="space-y-3 pt-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                          <CreditCard className="h-4 w-4 text-brand-primary dark:text-brand-accent" />
-                          Secure Booking Payment Channel
-                        </label>
-                        
-                        <div className="grid grid-cols-1 gap-2.5">
-                          {/* Option 1: UPI Dynamic QR */}
-                          <div 
-                            onClick={() => setSelectedPaymentMethod('upi_qr')}
-                            className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
-                              selectedPaymentMethod === 'upi_qr'
-                                ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
-                                : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
-                            }`}
-                          >
-                            <input 
-                              type="radio" 
-                              name="paymentMethod" 
-                              checked={selectedPaymentMethod === 'upi_qr'} 
-                              onChange={() => setSelectedPaymentMethod('upi_qr')}
-                              className="mt-1 text-brand-primary focus:ring-brand-primary"
-                            />
-                            <div className="space-y-0.5">
-                              <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
-                                📱 {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
-                                  ? `UPI Booking Deposit (₹${getGrandTotal()})` 
-                                  : `UPI Dynamic QR Code (₹${getGrandTotal()})`}
-                                {selectedPaymentMethod === 'upi_qr' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                              </p>
-                              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
-                                {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0) ? (
-                                  `Pay a refundable, adjustable deposit of ₹${getGrandTotal()} (5% self-booking discount applied). 100% credited against your final weighed bill.`
-                                ) : (
-                                  `Secure transaction of ₹${getGrandTotal()} instantly using GPay, PhonePe, Paytm, or BHIM.`
-                                )}
-                              </p>
-                            </div>
+                      {/* Payment Gateway Selector or Hassle-Free Zero Payment Banner */}
+                      {selectedServices.includes('hassle-free') ? (
+                        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                              ⚡ Hassle-Free Direct Pickup (No Payment Required)
+                            </h5>
                           </div>
-
-                          {/* Option 2: Prepaid Membership (Conditional) */}
-                          {(() => {
-                            const activeSub = getActiveMembership();
-                            if (!activeSub) return null;
-                            return (
-                              <div 
-                                onClick={() => setSelectedPaymentMethod('membership')}
-                                className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
-                                  selectedPaymentMethod === 'membership'
-                                    ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
-                                    : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
-                                }`}
-                              >
-                                <input 
-                                  type="radio" 
-                                  name="paymentMethod" 
-                                  checked={selectedPaymentMethod === 'membership'} 
-                                  onChange={() => setSelectedPaymentMethod('membership')}
-                                  className="mt-1 text-brand-primary focus:ring-brand-primary"
-                                />
-                                <div className="space-y-0.5">
-                                  <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
-                                    🌟 Prepaid Membership Balance
-                                    {selectedPaymentMethod === 'membership' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                                  </p>
-                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
-                                    Deduct from your active <strong className="text-emerald-600 dark:text-emerald-400">{activeSub.packageType}</strong> balance. Balance: <strong>₹{activeSub.balance}</strong> (Order Total: <strong>₹{getGrandTotal()}</strong>)
-                                  </p>
-                                </div>
-                              </div>
-                            );
-                          })()}
-
-                          {/* Option 3: Postpaid Weight-Based Billing */}
-                          <div 
-                            onClick={() => setSelectedPaymentMethod('cod')}
-                            className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
-                              selectedPaymentMethod === 'cod'
-                                ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
-                                : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
-                            }`}
-                          >
-                            <input 
-                              type="radio" 
-                              name="paymentMethod" 
-                              checked={selectedPaymentMethod === 'cod'} 
-                              onChange={() => setSelectedPaymentMethod('cod')}
-                              className="mt-1 text-brand-primary focus:ring-brand-primary"
-                            />
-                            <div className="space-y-0.5">
-                              <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
-                                🤝 Postpaid Weight Billing (₹0 Upfront)
-                                {selectedPaymentMethod === 'cod' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                              </p>
-                              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
-                                Pay ₹0 today. We will collect, verify, and weigh your clothes at our facility, then send you an itemized bill. Pay after service via UPI, cash, or cards.
-                              </p>
-                            </div>
-                          </div>
+                          <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
+                            No upfront payment or card is needed! When you click Confirm below, our valet will be scheduled directly. Your clothes will be weighed and counted upon pickup, and a digital invoice will be sent to your WhatsApp.
+                          </p>
                         </div>
+                      ) : (
+                        <div className="space-y-3 pt-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                            <CreditCard className="h-4 w-4 text-brand-primary dark:text-brand-accent" />
+                            Secure Booking Payment Channel
+                          </label>
+                          
+                          <div className="grid grid-cols-1 gap-2.5">
+                            {/* Option 1: UPI Dynamic QR */}
+                            <div 
+                              onClick={() => setSelectedPaymentMethod('upi_qr')}
+                              className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
+                                selectedPaymentMethod === 'upi_qr'
+                                  ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
+                                  : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
+                              }`}
+                            >
+                              <input 
+                                type="radio" 
+                                name="paymentMethod" 
+                                checked={selectedPaymentMethod === 'upi_qr'} 
+                                onChange={() => setSelectedPaymentMethod('upi_qr')}
+                                className="mt-1 text-brand-primary focus:ring-brand-primary"
+                              />
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
+                                  📱 {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
+                                    ? `UPI Booking Deposit (₹${getGrandTotal()})` 
+                                    : `UPI Dynamic QR Code (₹${getGrandTotal()})`}
+                                  {selectedPaymentMethod === 'upi_qr' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                                </p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
+                                  {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0) ? (
+                                    `Pay a refundable, adjustable deposit of ₹${getGrandTotal()} (5% self-booking discount applied). 100% credited against your final weighed bill.`
+                                  ) : (
+                                    `Secure transaction of ₹${getGrandTotal()} instantly using GPay, PhonePe, Paytm, or BHIM.`
+                                  )}
+                                </p>
+                              </div>
+                            </div>
 
-                        {formErrors.payment && (
-                          <div className="p-3.5 rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-500 text-xs font-semibold flex items-start gap-2 animate-shake">
-                            <span className="text-sm shrink-0">⚠️</span>
-                            <div>
-                              <p className="font-bold">Transaction Alert</p>
-                              <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">{formErrors.payment}</p>
+                            {/* Option 2: Prepaid Membership (Conditional) */}
+                            {(() => {
+                              const activeSub = getActiveMembership();
+                              if (!activeSub) return null;
+                              return (
+                                <div 
+                                  onClick={() => setSelectedPaymentMethod('membership')}
+                                  className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
+                                    selectedPaymentMethod === 'membership'
+                                      ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
+                                      : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
+                                  }`}
+                                >
+                                  <input 
+                                    type="radio" 
+                                    name="paymentMethod" 
+                                    checked={selectedPaymentMethod === 'membership'} 
+                                    onChange={() => setSelectedPaymentMethod('membership')}
+                                    className="mt-1 text-brand-primary focus:ring-brand-primary"
+                                  />
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
+                                      🌟 Prepaid Membership Balance
+                                      {selectedPaymentMethod === 'membership' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
+                                      Deduct from your active <strong className="text-emerald-600 dark:text-emerald-400">{activeSub.packageType}</strong> balance. Balance: <strong>₹{activeSub.balance}</strong> (Order Total: <strong>₹{getGrandTotal()}</strong>)
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            {/* Option 3: Postpaid Weight-Based Billing */}
+                            <div 
+                              onClick={() => setSelectedPaymentMethod('cod')}
+                              className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex gap-3 ${
+                                selectedPaymentMethod === 'cod'
+                                  ? 'border-brand-primary dark:border-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 ring-1 ring-brand-primary dark:ring-brand-accent'
+                                  : 'border-slate-200 dark:border-brand-teal/10 hover:border-slate-300 dark:hover:border-brand-accent/20 bg-white dark:bg-brand-dark/20'
+                              }`}
+                            >
+                              <input 
+                                type="radio" 
+                                name="paymentMethod" 
+                                checked={selectedPaymentMethod === 'cod'} 
+                                onChange={() => setSelectedPaymentMethod('cod')}
+                                className="mt-1 text-brand-primary focus:ring-brand-primary"
+                              />
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
+                                  🤝 Postpaid Weight Billing (₹0 Upfront)
+                                  {selectedPaymentMethod === 'cod' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                                </p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
+                                  Pay ₹0 today. We will collect, verify, and weigh your clothes at our facility, then send you an itemized bill. Pay after service via UPI, cash, or cards.
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        )}
-                      </div>
+
+                          {formErrors.payment && (
+                            <div className="p-3.5 rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-500 text-xs font-semibold flex items-start gap-2 animate-shake">
+                              <span className="text-sm shrink-0">⚠️</span>
+                              <div>
+                                <p className="font-bold">Transaction Alert</p>
+                                <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">{formErrors.payment}</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* WhatsApp Executive Notification Toggle */}
                       <div className="flex items-center justify-between p-4 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 rounded-xl">
@@ -3226,20 +3427,33 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                     )}
 
                     {step < 5 ? (
-                      <button
-                        type="button"
-                        onClick={handleNextStep}
-                        className="flex items-center gap-1.5 rounded-full bg-brand-primary px-6 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-brand-deep dark:bg-brand-accent dark:text-brand-deep"
-                        id="next-step-btn"
-                      >
-                        Continue
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {hasReachedReview && (
+                          <button
+                            type="button"
+                            onClick={() => setStep(5)}
+                            className="flex items-center gap-1.5 rounded-full border border-brand-primary/40 bg-brand-primary/10 px-4 py-2.5 text-xs font-bold text-brand-primary hover:bg-brand-primary/20 dark:border-brand-accent/40 dark:bg-brand-accent/15 dark:text-brand-accent cursor-pointer transition-all shadow-xs"
+                            id="return-to-review-btn"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Return to Review (Step 5)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleNextStep}
+                          className="flex items-center gap-1.5 rounded-full bg-brand-primary px-6 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-brand-deep dark:bg-brand-accent dark:text-brand-deep cursor-pointer"
+                          id="next-step-btn"
+                        >
+                          Continue
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
                     ) : (
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="flex items-center gap-1.5 rounded-full bg-linear-to-r from-brand-primary to-brand-secondary px-8 py-2.5 text-xs font-semibold text-white shadow-md hover:opacity-95 disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-full bg-linear-to-r from-brand-primary to-brand-secondary px-8 py-2.5 text-xs font-semibold text-white shadow-md hover:opacity-95 disabled:opacity-50 cursor-pointer"
                         id="confirm-booking-btn"
                       >
                         {isSubmitting ? (
@@ -3249,7 +3463,7 @@ export default function BookingModal({ isOpen, onClose, initialServiceId, initia
                           </span>
                         ) : (
                           <>
-                            Confirm & Schedule Pickup
+                            {selectedServices.includes('hassle-free') ? '⚡ Confirm Hassle-Free Pickup (₹0 Today)' : 'Confirm & Schedule Pickup'}
                             <Sparkles className="h-4 w-4" />
                           </>
                         )}

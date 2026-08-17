@@ -167,9 +167,9 @@ export default function BeforeAfter() {
 
         {/* Category Filters */}
         <div className="flex flex-wrap justify-center gap-2 mb-12">
-          {CATEGORIES.map(cat => (
+          {CATEGORIES.map((cat, catIdx) => (
             <button
-              key={cat.id}
+              key={`ba-cat-${cat.id}-${catIdx}`}
               onClick={() => setActiveTab(cat.id)}
               className={`px-4.5 py-2.5 rounded-full text-xs font-semibold uppercase tracking-wider transition-all ${
                 activeTab === cat.id
