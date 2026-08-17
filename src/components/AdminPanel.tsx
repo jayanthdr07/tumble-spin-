@@ -687,34 +687,17 @@ export default function AdminPanel({
   const [priceEditorTab, setPriceEditorTab] = useState<'services' | 'estimator' | 'booking'>('services');
   const [priceSuccessMessage, setPriceSuccessMessage] = useState('');
 
-  // Theme state for admin/master admin (Day Light = light, Night Light = dark)
-  const [adminTheme, setAdminTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('tumblespin_admin_theme');
-    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
-  });
+  // Theme state: permanently set to Night Light (dark mode) across entire website
+  const adminTheme = 'dark';
 
-  // Apply light mode (Day Light) or dark mode (Night Light) only for authenticated admin/master admin
+  // Apply dark mode (Night Light) permanently
   useEffect(() => {
-    if (isOpen && isAuthorized) {
-      if (adminTheme === 'light') {
-        document.documentElement.classList.remove('dark');
-        localStorage.setItem('theme', 'light');
-      } else {
-        document.documentElement.classList.add('dark');
-        localStorage.setItem('theme', 'dark');
-      }
-    } else {
-      // Revert to default Night Light (dark mode) when AdminPanel is closed or unauthorized
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    }
-
-    return () => {
-      // Cleanup / Revert on unmount
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    };
-  }, [isOpen, isAuthorized, adminTheme]);
+    document.documentElement.classList.add('dark');
+    document.documentElement.style.backgroundColor = '#0B0914';
+    document.documentElement.style.colorScheme = 'dark';
+    localStorage.setItem('theme', 'dark');
+    localStorage.setItem('tumblespin_admin_theme', 'dark');
+  }, [isOpen, isAuthorized]);
 
   // Listen for real-time new booking notifications dispatched from Firebase snapshot listener
   useEffect(() => {
@@ -1533,28 +1516,13 @@ export default function AdminPanel({
               </div>
               <div className="flex items-center gap-3">
                 {isAuthorized && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextTheme = adminTheme === 'light' ? 'dark' : 'light';
-                      setAdminTheme(nextTheme);
-                      localStorage.setItem('tumblespin_admin_theme', nextTheme);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-dark/50 hover:bg-slate-50 dark:hover:bg-brand-deep/50 text-xs font-bold text-slate-600 dark:text-slate-300 transition-all cursor-pointer shadow-xs"
-                    title="Toggle daylight (light mode) or nightlight (dark mode)"
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-brand-teal/20 bg-brand-dark/60 text-xs font-bold text-slate-300 shadow-xs"
+                    title="Night Light Mode Active"
                   >
-                    {adminTheme === 'light' ? (
-                      <>
-                        <Sun className="h-3.5 w-3.5 text-amber-500 fill-amber-400" />
-                        <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wider font-mono text-amber-600">Day Light</span>
-                      </>
-                    ) : (
-                      <>
-                        <Moon className="h-3.5 w-3.5 text-brand-accent fill-brand-accent/20" />
-                        <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wider font-mono text-brand-accent">Night Light</span>
-                      </>
-                    )}
-                  </button>
+                    <Moon className="h-3.5 w-3.5 text-brand-accent fill-brand-accent/20" />
+                    <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wider font-mono text-brand-accent">Night Light</span>
+                  </div>
                 )}
                 <button 
                   onClick={onClose}

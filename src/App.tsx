@@ -142,17 +142,14 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Apply dark mode styling to document html tag - toggled for admin "day light" effect
+  // Apply dark mode (Night Light) styling to document html tag permanently
   useEffect(() => {
-    if (isAdminOpen) {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-      initializeFirebaseSync(true);
-    } else {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-      initializeFirebaseSync(false);
-    }
+    document.documentElement.classList.add('dark');
+    document.documentElement.style.backgroundColor = '#0B0914';
+    document.documentElement.style.colorScheme = 'dark';
+    localStorage.setItem('theme', 'dark');
+    localStorage.setItem('tumblespin_admin_theme', 'dark');
+    initializeFirebaseSync(isAdminOpen);
   }, [isAdminOpen]);
 
   // Update document title and description for local SEO in Bangalore
