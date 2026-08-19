@@ -214,22 +214,35 @@ export default function BookingModal({
   });
 
   useEffect(() => {
-    const handleStorageChange = () => {
+    const handleStorageChange = (e?: any) => {
+      if (e?.detail) {
+        setCustomPrices(e.detail);
+        return;
+      }
       const saved = localStorage.getItem('tumblespin_custom_prices');
       if (saved) {
         try {
           setCustomPrices(JSON.parse(saved));
-        } catch (e) {}
+        } catch (err) {}
       }
     };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    };
   }, []);
 
   const effectiveSubServices = SUB_SERVICES.map(service => {
     const override = customPrices?.booking?.[service.id];
-    if (override !== undefined && override !== null) {
+    if (override !== undefined && override !== null && override !== '') {
       return { ...service, price: Number(override) };
+    }
+    // Also check estimator dryClean override if set
+    const estimatorOverride = customPrices?.estimator?.[service.id]?.dryClean;
+    if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '') {
+      return { ...service, price: Number(estimatorOverride) };
     }
     return service;
   });

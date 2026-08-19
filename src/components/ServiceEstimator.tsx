@@ -133,16 +133,24 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
   });
 
   useEffect(() => {
-    const handleStorageChange = () => {
+    const handleStorageChange = (e?: any) => {
+      if (e?.detail) {
+        setCustomPrices(e.detail);
+        return;
+      }
       const saved = localStorage.getItem('tumblespin_custom_prices');
       if (saved) {
         try {
           setCustomPrices(JSON.parse(saved));
-        } catch (e) {}
+        } catch (err) {}
       }
     };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    };
   }, []);
 
   const filteredItems = ESTIMATOR_ITEMS.filter(item => item.category === activeCategory);
@@ -163,8 +171,13 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
   const getPriceForType = (item: EstimatorItem, type: 'Dry Clean' | 'Steam Iron'): number => {
     const key = type === 'Dry Clean' ? 'dryClean' : 'steamIron';
     const override = customPrices?.estimator?.[item.id]?.[key];
-    if (override !== undefined && override !== null) {
+    if (override !== undefined && override !== null && override !== '') {
       return Number(override);
+    }
+    // Fallback to booking override if estimator dryClean is not directly set
+    const bookingOverride = customPrices?.booking?.[item.id];
+    if (bookingOverride !== undefined && bookingOverride !== null && bookingOverride !== '' && type === 'Dry Clean') {
+      return Number(bookingOverride);
     }
     if (type === 'Dry Clean') return item.dryCleanPrice || 0;
     return item.steamIronPrice || 0;

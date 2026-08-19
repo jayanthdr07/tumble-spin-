@@ -30,21 +30,29 @@ export default function Services({ onSelectService }: ServicesProps) {
   });
 
   useEffect(() => {
-    const handleStorageChange = () => {
+    const handleStorageChange = (e?: any) => {
+      if (e?.detail) {
+        setCustomPrices(e.detail);
+        return;
+      }
       const saved = localStorage.getItem('tumblespin_custom_prices');
       if (saved) {
         try {
           setCustomPrices(JSON.parse(saved));
-        } catch (e) {}
+        } catch (err) {}
       }
     };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    };
   }, []);
 
   const getServicePriceString = (id: string, defaultPrice: string) => {
     const override = customPrices?.services?.[id];
-    if (override !== undefined && override !== null) {
+    if (override !== undefined && override !== null && override !== '') {
       if (id === 'express') {
         return `+₹${override} flat`;
       } else if (id === 'wash-fold' || id === 'wash-iron') {
@@ -55,6 +63,17 @@ export default function Services({ onSelectService }: ServicesProps) {
         return `₹${override}/pair`;
       }
       return `₹${override}`;
+    }
+
+    // Fallbacks to booking overrides if service override is not explicitly set
+    if (id === 'wash-fold' && customPrices?.booking?.['laundry-wash-fold'] !== undefined) {
+      return `₹${customPrices.booking['laundry-wash-fold']}/kg`;
+    }
+    if (id === 'wash-iron' && customPrices?.booking?.['laundry-wash-steam-iron'] !== undefined) {
+      return `₹${customPrices.booking['laundry-wash-steam-iron']}/kg`;
+    }
+    if (id === 'shoe-spa' && customPrices?.booking?.['shoes-spa-care'] !== undefined) {
+      return `₹${customPrices.booking['shoes-spa-care']}/pair`;
     }
     return defaultPrice;
   };
