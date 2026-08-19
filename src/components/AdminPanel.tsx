@@ -132,6 +132,8 @@ export default function AdminPanel({
   const [loginTab, setLoginTab] = useState<'admin' | 'master'>('admin');
   const [masterEmail, setMasterEmail] = useState('');
   const [masterPassword, setMasterPassword] = useState('');
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [showMasterPassword, setShowMasterPassword] = useState(false);
 
   // Deleted orders list
   const [deletedOrders, setDeletedOrders] = useState<any[]>(() => {
@@ -1435,18 +1437,18 @@ export default function AdminPanel({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div id="admin-panel-container" className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-md ${
-          isAuthorized ? 'p-0 overflow-hidden' : 'p-0 md:p-4 overflow-y-auto'
+        <div id="admin-panel-container" className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md ${
+          isAuthorized ? 'p-0 overflow-hidden' : 'p-2 sm:p-4 overflow-y-auto'
         }`}>
           
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className={`relative w-full overflow-hidden border border-slate-100 dark:border-brand-teal/15 shadow-2xl flex flex-col ${
+            className={`relative w-full border border-slate-100 dark:border-brand-teal/15 shadow-2xl flex flex-col ${
               !isAuthorized 
-                ? 'max-w-md rounded-3xl max-h-[85vh] bg-white dark:bg-brand-dark' 
-                : 'max-w-7xl h-[100dvh] max-h-[100dvh] md:h-[95vh] md:max-h-[92vh] rounded-none md:rounded-3xl bg-white dark:bg-brand-dark'
+                ? 'max-w-md w-full my-auto rounded-3xl max-h-[92vh] sm:max-h-[88vh] bg-white dark:bg-brand-dark overflow-hidden' 
+                : 'max-w-7xl h-[100dvh] max-h-[100dvh] md:h-[95vh] md:max-h-[92vh] rounded-none md:rounded-3xl bg-white dark:bg-brand-dark overflow-hidden'
             }`}
           >
             {/* Automated Notification Trigger Floating Alert */}
@@ -1492,29 +1494,29 @@ export default function AdminPanel({
                 <img 
                   src={HERO_IMAGE_PATH} 
                   alt="Tumble Spin Premium Laundry background" 
-                  className="w-full h-full object-cover opacity-40 dark:opacity-30"
+                  className="w-full h-full object-cover opacity-30 dark:opacity-20"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute inset-0 bg-white/60 dark:bg-brand-deep/80" />
+                <div className="absolute inset-0 bg-slate-950/80 dark:bg-brand-deep/85" />
               </div>
             )}
 
             {/* Header */}
-            <div className={`p-6 border-b border-slate-100 dark:border-brand-teal/10 flex justify-between items-center relative z-10 ${
+            <div className={`p-4 sm:p-5 border-b border-slate-100 dark:border-brand-teal/10 flex justify-between items-center relative z-10 shrink-0 ${
               !isAuthorized 
-                ? 'bg-slate-50/70 dark:bg-brand-deep/30 backdrop-blur-md md:bg-slate-50 md:dark:bg-brand-deep/35' 
+                ? 'bg-slate-50/90 dark:bg-brand-deep/60 backdrop-blur-md' 
                 : 'bg-slate-50 dark:bg-brand-deep/35'
             }`}>
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent">
-                  <Lock className="h-5 w-5" />
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent shrink-0">
+                  <Lock className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-serif">Tumble Spin Concierge Deck</h3>
-                  <p className="text-[10px] uppercase font-mono tracking-widest text-slate-400 font-bold">Administrative Dashboard</p>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white font-serif leading-tight">Tumble Spin Concierge</h3>
+                  <p className="text-[9px] sm:text-[10px] uppercase font-mono tracking-widest text-slate-400 font-bold">Administrative Access</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 {isAuthorized && (
                   <div
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-brand-teal/20 bg-brand-dark/60 text-xs font-bold text-slate-300 shadow-xs"
@@ -1526,33 +1528,33 @@ export default function AdminPanel({
                 )}
                 <button 
                   onClick={onClose}
-                  className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-brand-teal/20 text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                  className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-brand-teal/20 text-slate-400 hover:text-slate-200 dark:hover:text-white transition-colors cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
 
-            {/* Auth Gate Screen */}
+            {/* Auth Gate Screen with Smooth Scroll on Compact Devices */}
             {!isAuthorized ? (
-              <div className="p-8 sm:p-10 text-center max-w-md mx-auto space-y-6 relative z-10 bg-white/40 dark:bg-brand-dark/20 backdrop-blur-xs md:bg-transparent md:backdrop-blur-none rounded-b-3xl w-full">
-                <ShieldAlert className="h-12 w-12 text-brand-primary dark:text-brand-accent mx-auto" />
-                <div className="space-y-2">
-                  <h4 className="text-md font-bold text-slate-800 dark:text-white">Admin Credentials Requested</h4>
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    This control dashboard manages real-time bookings. Please select your role and authenticate.
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-5 sm:p-7 text-center max-w-md mx-auto space-y-4 sm:space-y-5 relative z-10 bg-white/40 dark:bg-brand-dark/20 backdrop-blur-xs md:bg-transparent md:backdrop-blur-none rounded-b-3xl w-full">
+                <div className="space-y-1.5">
+                  <ShieldAlert className="h-9 w-9 sm:h-11 sm:w-11 text-brand-primary dark:text-brand-accent mx-auto" />
+                  <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Admin Authentication</h4>
+                  <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-400 leading-relaxed max-w-xs mx-auto">
+                    Please select your role and enter your secure credentials to manage real-time bookings.
                   </p>
                 </div>
 
                 {/* Login Role Switcher Tabs */}
-                <div className="flex border border-slate-200 dark:border-brand-teal/20 p-1 rounded-xl bg-slate-50/50 dark:bg-brand-deep/30">
+                <div className="flex border border-slate-200 dark:border-brand-teal/20 p-1 rounded-xl bg-slate-50/80 dark:bg-brand-deep/50">
                   <button
                     type="button"
                     onClick={() => {
                       setLoginTab('admin');
                       setErrorMsg('');
                     }}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                       loginTab === 'admin'
                         ? 'bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep shadow-xs'
                         : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
@@ -1566,7 +1568,7 @@ export default function AdminPanel({
                       setLoginTab('master');
                       setErrorMsg('');
                     }}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                       loginTab === 'master'
                         ? 'bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep shadow-xs'
                         : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
@@ -1576,57 +1578,96 @@ export default function AdminPanel({
                   </button>
                 </div>
 
-                <form onSubmit={handleAuthSubmit} className="space-y-4 text-left">
+                <form onSubmit={handleAuthSubmit} className="space-y-3.5 text-left">
                   {loginTab === 'admin' ? (
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
-                        Admin Passcode
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="Enter passkey..."
-                        value={passcode}
-                        onChange={(e) => setPasscode(e.target.value)}
-                        className="w-full text-center tracking-widest rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white focus:outline-hidden focus:border-brand-primary"
-                      />
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
+                          Admin Passcode
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowPasscode(!showPasscode)}
+                          className="text-[10px] text-brand-primary dark:text-brand-accent font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                        >
+                          {showPasscode ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> Show</>}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showPasscode ? "text" : "password"}
+                          placeholder="Enter passkey..."
+                          value={passcode}
+                          onChange={(e) => setPasscode(e.target.value)}
+                          className="w-full text-center tracking-widest rounded-xl border border-slate-200 bg-white/95 px-10 py-2.5 sm:py-3 text-sm font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/90 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPasscode(!showPasscode)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                        >
+                          {showPasscode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div className="space-y-3.5">
+                    <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
                           Master Email
                         </label>
                         <input
-                          type="text"
-                          placeholder="Enter master email (Prakashcsat@gmail.com)"
+                          type="email"
+                          placeholder="Enter master email (e.g. Prakashcsat@gmail.com)"
                           value={masterEmail}
                           onChange={(e) => setMasterEmail(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 text-xs font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                          className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 text-xs font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/90 dark:text-white focus:outline-hidden focus:border-brand-primary"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
-                          Master Password
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="••••••••"
-                          value={masterPassword}
-                          onChange={(e) => setMasterPassword(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 text-xs font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/80 dark:text-white focus:outline-hidden focus:border-brand-primary"
-                        />
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
+                            Master Password
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowMasterPassword(!showMasterPassword)}
+                            className="text-[10px] text-brand-primary dark:text-brand-accent font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            {showMasterPassword ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> Show</>}
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={showMasterPassword ? "text" : "password"}
+                            placeholder="Enter master password..."
+                            value={masterPassword}
+                            onChange={(e) => setMasterPassword(e.target.value)}
+                            className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 pr-10 py-2.5 text-xs font-bold text-slate-800 dark:border-brand-teal/20 dark:bg-brand-deep/90 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowMasterPassword(!showMasterPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                          >
+                            {showMasterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {errorMsg && (
-                    <p className="text-xs font-semibold text-rose-500 text-center">{errorMsg}</p>
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">
+                      <p className="text-xs font-semibold text-rose-400">{errorMsg}</p>
+                    </div>
                   )}
                   <button
                     type="submit"
-                    className="w-full rounded-full bg-brand-primary text-white py-3 text-xs font-bold uppercase tracking-wider shadow-md hover:bg-brand-deep transition-all dark:bg-brand-accent dark:text-brand-deep cursor-pointer text-center"
+                    className="w-full min-h-[44px] rounded-full bg-brand-primary text-white py-2.5 sm:py-3 text-xs font-bold uppercase tracking-wider shadow-md hover:bg-brand-deep transition-all dark:bg-brand-accent dark:text-brand-deep cursor-pointer text-center flex items-center justify-center gap-2 mt-2"
                   >
-                    Authorize Session
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>Authorize Session</span>
                   </button>
                 </form>
               </div>

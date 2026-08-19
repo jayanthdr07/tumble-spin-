@@ -203,7 +203,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-b from-white to-brand-light dark:from-brand-dark dark:to-brand-deep/30 transition-colors duration-500 selection:bg-brand-primary/20 selection:text-brand-primary dark:selection:bg-brand-accent/20 dark:selection:text-brand-accent">
+    <div className="min-h-screen bg-[#0B0914] bg-linear-to-b from-brand-dark to-[#0B0914] text-slate-100 selection:bg-brand-accent/20 selection:text-brand-accent">
       
       {/* Header / Navbar section */}
       <Header 
@@ -467,8 +467,8 @@ export default function App() {
         onUpdateDynamicPricing={handleUpdateDynamicPricing}
       />
 
-      {/* Dual Floating Contacts Button Stack (Left-aligned) */}
-      <div className="fixed bottom-6 left-6 z-[999] flex flex-col gap-3.5 items-start">
+      {/* Dual Floating Contacts Button Stack (Right-aligned) */}
+      <div className="fixed bottom-6 right-6 z-[999] flex flex-col gap-3.5 items-end">
         {/* Instagram Floating Button */}
         <a
           href="https://www.instagram.com/tumblespinofficial?igsh=MTdjNnFzZ2xxdWhpcw=="
@@ -478,7 +478,7 @@ export default function App() {
           title="Follow us on Instagram"
           id="floating-instagram-btn"
         >
-          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Follow on Instagram 📸
           </span>
           <Instagram className="h-5.5 w-5.5" />
@@ -493,7 +493,7 @@ export default function App() {
           title="Follow us on Facebook"
           id="floating-facebook-btn"
         >
-          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Follow on Facebook 👥
           </span>
           <Facebook className="h-5.5 w-5.5" />
@@ -506,7 +506,7 @@ export default function App() {
           title="Call us directly"
           id="floating-call-btn"
         >
-          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Call Tumble Spin 📞
           </span>
           <PhoneCall className="h-5.5 w-5.5 animate-bounce" />
@@ -521,7 +521,7 @@ export default function App() {
           title="Chat with us on WhatsApp"
           id="floating-whatsapp-btn"
         >
-          <span className="absolute left-full ml-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
+          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-lg bg-slate-900/90 dark:bg-slate-900/95 text-white text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-md">
             Chat on WhatsApp 💬
           </span>
           <svg

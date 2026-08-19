@@ -22,13 +22,18 @@ export const ESTIMATOR_ITEMS: EstimatorItem[] = [
   { id: 'laundry-wash-iron', name: 'Wash & Steam Iron', category: 'laundry', dryCleanPrice: 129, steamIronPrice: null, unit: 'kg' },
 
   // Kids Wear
-  { id: 'kids-shirt-tshirt', name: 'Kids Shirt / T-Shirt', category: 'kids', dryCleanPrice: 69, steamIronPrice: 30 },
-  { id: 'kids-jeans-trouser', name: 'Kids Jeans / Shorts', category: 'kids', dryCleanPrice: 69, steamIronPrice: 30 },
-  { id: 'kids-frock-dress', name: 'Kids Dress / Frock', category: 'kids', dryCleanPrice: 99, steamIronPrice: 40 },
-  { id: 'kids-uniform', name: 'Kids School Uniform (Set)', category: 'kids', dryCleanPrice: 119, steamIronPrice: 45 },
-  { id: 'kids-ethnic', name: 'Kids Kurta / Ethnic Wear', category: 'kids', dryCleanPrice: 129, steamIronPrice: 50 },
-  { id: 'kids-jacket', name: 'Kids Winter Jacket / Sweater', category: 'kids', dryCleanPrice: 129, steamIronPrice: 60 },
-  { id: 'kids-soft-toy', name: 'Kids Soft Toy / Blanket', category: 'kids', dryCleanPrice: 149, steamIronPrice: null },
+  { id: 'kids-shirt', name: 'Kids Shirt', category: 'kids', dryCleanPrice: 50, steamIronPrice: 20 },
+  { id: 'kids-tshirt', name: 'Kids T-Shirt', category: 'kids', dryCleanPrice: 50, steamIronPrice: 20 },
+  { id: 'kids-jeans', name: 'Kids Jeans', category: 'kids', dryCleanPrice: 60, steamIronPrice: 25 },
+  { id: 'kids-kurta', name: 'Kids Kurta', category: 'kids', dryCleanPrice: 50, steamIronPrice: 20 },
+  { id: 'kids-pyjama', name: 'Kids Pyjama', category: 'kids', dryCleanPrice: 40, steamIronPrice: 15 },
+  { id: 'kids-dupatta', name: 'Kids Dupatta', category: 'kids', dryCleanPrice: 40, steamIronPrice: 15 },
+  { id: 'kids-dhoti', name: 'Kids Dhoti', category: 'kids', dryCleanPrice: 50, steamIronPrice: 20 },
+  { id: 'kids-lehenga', name: 'Kids Lehenga', category: 'kids', dryCleanPrice: 150, steamIronPrice: 60 },
+  { id: 'kids-shoes', name: "Kids Shoes", category: 'kids', dryCleanPrice: 130, steamIronPrice: null },
+  { id: 'kids-leather-shoes', name: "Kids Leather Shoes", category: 'kids', dryCleanPrice: 170, steamIronPrice: null },
+  { id: 'kids-semi-leather-shoes', name: 'Kids Semi Leather Shoes', category: 'kids', dryCleanPrice: 160, steamIronPrice: null },
+  { id: 'kids-speed-leather-shoes', name: 'Kids Speed Leather Shoes', category: 'kids', dryCleanPrice: 180, steamIronPrice: null },
 
   // Men's Wear
   { id: 'men-shirt', name: 'T-Shirt / Shirt', category: 'men', dryCleanPrice: 110, steamIronPrice: 40 },
@@ -197,7 +202,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     setCart(prev => {
       return prev.map(i => {
         if (`${i.id}-${i.serviceType}` === cartKey) {
-          const newQty = i.quantity + change;
+          const newQty = Math.round((i.quantity + change) * 10) / 10;
           return newQty > 0 ? { ...i, quantity: newQty } : null;
         }
         return i;

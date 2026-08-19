@@ -69,13 +69,18 @@ export const SUB_SERVICES: SubService[] = [
   { id: 'laundry-steam-press-kg', name: 'Steam Press Only (per kg)', category: 'laundry', price: 89, serviceType: 'Steam Iron' },
 
   // Kids Wear
-  { id: 'kids-shirt-tshirt', name: 'Kids Shirt / T-Shirt', category: 'kids', price: 69, serviceType: 'Premium Dry Clean' },
-  { id: 'kids-jeans-trouser', name: 'Kids Jeans / Shorts', category: 'kids', price: 69, serviceType: 'Premium Dry Clean' },
-  { id: 'kids-frock-dress', name: 'Kids Dress / Frock', category: 'kids', price: 99, serviceType: 'Premium Dry Clean' },
-  { id: 'kids-uniform', name: 'Kids School Uniform (Set)', category: 'kids', price: 119, serviceType: 'Premium Dry Clean' },
-  { id: 'kids-ethnic', name: 'Kids Kurta / Ethnic Wear', category: 'kids', price: 129, serviceType: 'Premium Dry Clean' },
-  { id: 'kids-jacket', name: 'Kids Winter Jacket / Sweater', category: 'kids', price: 129, serviceType: 'Woolen Dry Clean' },
-  { id: 'kids-soft-toy', name: 'Kids Soft Toy / Blanket', category: 'kids', price: 149, serviceType: 'Household Care' },
+  { id: 'kids-shirt', name: 'Kids Shirt', category: 'kids', price: 50, serviceType: 'Kids Care' },
+  { id: 'kids-tshirt', name: 'Kids T-Shirt', category: 'kids', price: 50, serviceType: 'Kids Care' },
+  { id: 'kids-jeans', name: 'Kids Jeans', category: 'kids', price: 60, serviceType: 'Kids Care' },
+  { id: 'kids-kurta', name: 'Kids Kurta', category: 'kids', price: 50, serviceType: 'Kids Care' },
+  { id: 'kids-pyjama', name: 'Kids Pyjama', category: 'kids', price: 40, serviceType: 'Kids Care' },
+  { id: 'kids-dupatta', name: 'Kids Dupatta', category: 'kids', price: 40, serviceType: 'Kids Care' },
+  { id: 'kids-dhoti', name: 'Kids Dhoti', category: 'kids', price: 50, serviceType: 'Kids Care' },
+  { id: 'kids-lehenga', name: 'Kids Lehenga', category: 'kids', price: 150, serviceType: 'Kids Ethnic' },
+  { id: 'kids-shoes', name: "Kids Shoes", category: 'kids', price: 130, serviceType: 'Kids Footwear' },
+  { id: 'kids-leather-shoes', name: "Kids Leather Shoes", category: 'kids', price: 170, serviceType: 'Leather Care' },
+  { id: 'kids-semi-leather-shoes', name: 'Kids Semi Leather Shoes', category: 'kids', price: 160, serviceType: 'Leather Care' },
+  { id: 'kids-speed-leather-shoes', name: 'Kids Speed Leather Shoes', category: 'kids', price: 180, serviceType: 'Leather Care' },
 
   // Men's Wear
   { id: 'men-shirt', name: 'Shirt / T-Shirt', category: 'men', price: 99, serviceType: 'Premium Dry Clean' },
@@ -700,13 +705,20 @@ export default function BookingModal({
     return Object.keys(errors).length === 0;
   };
 
-  // Adjust garment subservice quantities
+  // Adjust garment subservice quantities (supports both whole counts and decimal fractions like 0.1, 0.5, 1.2 kg)
   const updateQuantity = (id: string, amount: number) => {
     setQuantities(prev => {
       const cur = prev[id] || 0;
-      const next = Math.max(0, cur + amount);
+      const next = Math.max(0, Math.round((cur + amount) * 10) / 10);
       return { ...prev, [id]: next };
     });
+  };
+
+  const setDirectQuantity = (id: string, value: number) => {
+    setQuantities(prev => ({
+      ...prev,
+      [id]: Math.max(0, Math.round(value * 10) / 10)
+    }));
   };
 
   // Compute live price projection
@@ -2536,86 +2548,157 @@ export default function BookingModal({
                         )}
                       </div>
 
-                      {/* Weight-Based KG Service Section */}
-                      {selectedServices.includes('wash-fold') && (
-                        <div className="p-4 rounded-2xl bg-linear-to-r from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 dark:border-emerald-500/30 space-y-3 text-left">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xl">⚖️</span>
-                              <div>
-                                <h5 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                                  Wash & Fold Weight Estimate
-                                </h5>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                                  Select estimated kilograms (minimum 1 kg)
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800">
-                              <span className="text-xs font-black text-brand-primary dark:text-brand-accent font-mono">
-                                ₹{adjustPrice(getSubservicePriceVal('laundry-wash-fold', 95))}/kg
-                              </span>
-                            </div>
-                          </div>
+                      {/* Weight-Based KG Service Section with Decimal Point Support */}
+                      {(selectedServices.includes('wash-fold') || selectedServices.includes('wash-iron')) && (
+                        <div className="p-4.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-emerald-500/10 border border-emerald-500/25 dark:border-emerald-500/35 space-y-3.5 text-left shadow-xs">
+                          {selectedServices.includes('wash-fold') && (() => {
+                            const currentKg = quantities['laundry-wash-fold'] !== undefined ? quantities['laundry-wash-fold'] : 5;
+                            const ratePerKg = adjustPrice(getSubservicePriceVal('laundry-wash-fold', 95));
+                            const estCost = Math.round(ratePerKg * currentKg);
+                            
+                            return (
+                              <div className="space-y-3">
+                                <div className="flex flex-wrap justify-between items-center gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-2xl">⚖️</span>
+                                    <div>
+                                      <h5 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                                        Wash & Fold Weight Estimate
+                                        <span className="text-[10px] normal-case bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-mono font-semibold px-2 py-0.5 rounded-full">
+                                          Decimals & Points Supported
+                                        </span>
+                                      </h5>
+                                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        Select or type precise kilograms (e.g. 0.5 kg, 1.2 kg, 2.5 kg, 5 kg)
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                                    <span className="text-xs font-black text-brand-primary dark:text-brand-accent font-mono">
+                                      ₹{ratePerKg}/kg
+                                    </span>
+                                  </div>
+                                </div>
 
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white/50 dark:bg-slate-950/20 p-3 rounded-xl border border-slate-100 dark:border-slate-900/40">
-                            <div className="flex items-center gap-2.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const currentKg = quantities['laundry-wash-fold'] || 0;
-                                  if (currentKg > 1) {
-                                    updateQuantity('laundry-wash-fold', -1);
-                                  }
-                                }}
-                                className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                              </button>
-                              <div className="flex flex-col items-center w-16">
-                                <span className="text-lg font-black font-mono text-slate-800 dark:text-white">
-                                  {quantities['laundry-wash-fold'] || 5}
-                                </span>
-                                <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold">KG</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateQuantity('laundry-wash-fold', 1);
-                                }}
-                                className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                                {/* Interactive Stepper & Input Controls */}
+                                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3.5 bg-white/70 dark:bg-slate-950/40 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                                  {/* Fine & Coarse Stepper Controls with Direct Input */}
+                                  <div className="flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
+                                    {/* -1 KG */}
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', -1)}
+                                      className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300 transition-colors shadow-2xs cursor-pointer"
+                                      title="Subtract 1 kg"
+                                    >
+                                      -1 kg
+                                    </button>
+                                    {/* -0.1 KG */}
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', -0.1)}
+                                      className="px-2 py-1.5 rounded-lg border border-emerald-500/30 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 transition-colors shadow-2xs cursor-pointer"
+                                      title="Subtract 0.1 kg"
+                                    >
+                                      -0.1
+                                    </button>
 
-                            <div className="flex-1 max-w-[200px]">
-                              <input
-                                type="range"
-                                min="1"
-                                max="30"
-                                value={quantities['laundry-wash-fold'] || 5}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
-                                  const currentVal = quantities['laundry-wash-fold'] || 0;
-                                  updateQuantity('laundry-wash-fold', val - currentVal);
-                                }}
-                                className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-primary dark:accent-brand-accent"
-                              />
-                              <div className="flex justify-between text-[8px] text-slate-400 mt-1 font-mono font-bold">
-                                <span>1 KG</span>
-                                <span>15 KG</span>
-                                <span>30 KG</span>
-                              </div>
-                            </div>
+                                    {/* Numeric Input & Display */}
+                                    <div className="flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 rounded-xl border-2 border-emerald-500/40 dark:border-emerald-500/60 shadow-2xs">
+                                      <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0.1"
+                                        max="100"
+                                        value={currentKg}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value);
+                                          if (!isNaN(val) && val >= 0) {
+                                            setDirectQuantity('laundry-wash-fold', val);
+                                          }
+                                        }}
+                                        className="w-16 sm:w-20 text-center text-lg font-black font-mono text-slate-900 dark:text-white bg-transparent focus:outline-hidden"
+                                        aria-label="Weight in Kilograms"
+                                      />
+                                      <span className="text-xs font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono">KG</span>
+                                    </div>
 
-                            <div className="text-right">
-                              <p className="text-[9px] text-slate-400 uppercase font-mono font-bold">Estimated Cost</p>
-                              <p className="text-md font-mono font-black text-brand-primary dark:text-brand-accent">
-                                ₹{adjustPrice(getSubservicePriceVal('laundry-wash-fold', 95)) * (quantities['laundry-wash-fold'] || 5)}
-                              </p>
-                            </div>
-                          </div>
+                                    {/* +0.1 KG */}
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', 0.1)}
+                                      className="px-2 py-1.5 rounded-lg border border-emerald-500/30 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 transition-colors shadow-2xs cursor-pointer"
+                                      title="Add 0.1 kg"
+                                    >
+                                      +0.1
+                                    </button>
+                                    {/* +1 KG */}
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', 1)}
+                                      className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300 transition-colors shadow-2xs cursor-pointer"
+                                      title="Add 1 kg"
+                                    >
+                                      +1 kg
+                                    </button>
+                                  </div>
+
+                                  {/* Live Slider with 0.1 Precision */}
+                                  <div className="flex-1 max-w-full md:max-w-[200px] px-1">
+                                    <input
+                                      type="range"
+                                      min="0.5"
+                                      max="30"
+                                      step="0.1"
+                                      value={currentKg}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        if (!isNaN(val)) {
+                                          setDirectQuantity('laundry-wash-fold', val);
+                                        }
+                                      }}
+                                      className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 dark:accent-emerald-400"
+                                    />
+                                    <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono font-bold">
+                                      <span>0.5 KG</span>
+                                      <span>15 KG</span>
+                                      <span>30 KG</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Real-time Estimated Cost */}
+                                  <div className="text-right flex sm:flex-col justify-between items-center sm:items-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60 dark:border-slate-800/60">
+                                    <p className="text-[10px] text-slate-400 uppercase font-mono font-bold">Estimated Cost</p>
+                                    <p className="text-base sm:text-lg font-mono font-black text-brand-primary dark:text-brand-accent">
+                                      ₹{estCost}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Quick Preset Buttons (Whole & Decimal Presets) */}
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">Quick Presets:</span>
+                                  {[1, 1.5, 2, 2.5, 3, 3.5, 5, 7.5, 10, 15, 20, 30].map((presetKg) => {
+                                    const isCurrent = Math.abs(currentKg - presetKg) < 0.05;
+                                    return (
+                                      <button
+                                        key={`kg-preset-${presetKg}`}
+                                        type="button"
+                                        onClick={() => setDirectQuantity('laundry-wash-fold', presetKg)}
+                                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
+                                          isCurrent
+                                            ? 'bg-emerald-600 text-white shadow-2xs ring-2 ring-emerald-400/40'
+                                            : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-emerald-400'
+                                        }`}
+                                      >
+                                        {presetKg} KG
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 
