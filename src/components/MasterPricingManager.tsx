@@ -132,7 +132,8 @@ export default function MasterPricingManager({
 
   // Helper to update price for an item
   const handleItemPriceChange = (item: MasterPricingItem, rawVal: string) => {
-    const numVal = rawVal.trim() === '' ? null : Number(rawVal);
+    const trimmed = rawVal.trim();
+    const numVal = trimmed === '' || isNaN(Number(trimmed)) ? null : parseFloat(trimmed);
 
     setDraftPrices((prev: any) => {
       const newBooking = { ...prev.booking };
@@ -171,7 +172,8 @@ export default function MasterPricingManager({
   // Helper to update steam iron price for dual-service items
   const handleSteamPriceChange = (item: MasterPricingItem, rawVal: string) => {
     if (!item.estimatorItemId) return;
-    const numVal = rawVal.trim() === '' ? null : Number(rawVal);
+    const trimmed = rawVal.trim();
+    const numVal = trimmed === '' || isNaN(Number(trimmed)) ? null : parseFloat(trimmed);
 
     setDraftPrices((prev: any) => {
       const newEstimator = { ...prev.estimator };
@@ -581,7 +583,7 @@ export default function MasterPricingManager({
 
                   return (
                     <div
-                      key={`pricing-card-${item.id}`}
+                      key={`pricing-card-${catKey}-${item.id}`}
                       className={`p-4 rounded-xl border transition-all space-y-3 flex flex-col justify-between ${
                         isModified
                           ? 'border-emerald-500/40 bg-emerald-50/20 dark:bg-emerald-950/10 shadow-xs ring-1 ring-emerald-500/20'
@@ -632,7 +634,7 @@ export default function MasterPricingManager({
                               <button
                                 type="button"
                                 onClick={() => handleResetSingleItem(item)}
-                                className="text-[10px] font-bold text-rose-500 hover:text-rose-600 flex items-center gap-0.5"
+                                className="text-[10px] font-bold text-rose-500 hover:text-rose-600 flex items-center gap-0.5 cursor-pointer"
                                 title="Reset to standard default"
                               >
                                 <RotateCcw className="h-2.5 w-2.5" />
@@ -646,6 +648,7 @@ export default function MasterPricingManager({
                             <input
                               type="number"
                               min="0"
+                              step="any"
                               placeholder={String(item.defaultPrice)}
                               value={currentCustomVal ?? ''}
                               onChange={(e) => handleItemPriceChange(item, e.target.value)}
@@ -672,6 +675,7 @@ export default function MasterPricingManager({
                               <input
                                 type="number"
                                 min="0"
+                                step="any"
                                 placeholder={String(item.estimatorSteamIronDefault || 0)}
                                 value={currentSteamVal ?? ''}
                                 onChange={(e) => handleSteamPriceChange(item, e.target.value)}

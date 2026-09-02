@@ -1448,7 +1448,7 @@ export default function AdminPanel({
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={`relative w-full border border-slate-100 dark:border-brand-teal/15 shadow-2xl flex flex-col ${
               !isAuthorized 
-                ? 'max-w-md w-full my-auto rounded-3xl max-h-[92vh] sm:max-h-[88vh] bg-white dark:bg-brand-dark overflow-hidden' 
+                ? 'max-w-md w-full my-auto rounded-3xl max-h-[96dvh] sm:max-h-[90vh] bg-white dark:bg-brand-dark overflow-hidden' 
                 : 'max-w-7xl h-[100dvh] max-h-[100dvh] md:h-[95vh] md:max-h-[92vh] rounded-none md:rounded-3xl bg-white dark:bg-brand-dark overflow-hidden'
             }`}
           >
@@ -3390,7 +3390,7 @@ export default function AdminPanel({
                                 const isOutOfStock = !inv.available || inv.stock <= 0;
                                 return (
                                   <button
-                                    key={`${item.id}-${idx}`}
+                                    key={`pos-item-${item.id}-${idx}`}
                                     type="button"
                                     disabled={isOutOfStock}
                                     onClick={() => handleAddCatalogToCart(item)}
@@ -3438,6 +3438,8 @@ export default function AdminPanel({
                                 />
                                 <input
                                   type="number"
+                                  step="any"
+                                  min="0"
                                   value={customItemPrice}
                                   onChange={(e) => setCustomItemPrice(e.target.value)}
                                   placeholder="Price ₹"
@@ -3446,7 +3448,7 @@ export default function AdminPanel({
                                 <button
                                   type="button"
                                   onClick={handleAddCustomItem}
-                                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 text-xs font-bold uppercase tracking-wider dark:bg-brand-accent dark:text-brand-deep transition-all shrink-0"
+                                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900 text-xs font-bold uppercase tracking-wider dark:bg-brand-accent dark:text-brand-deep transition-all shrink-0 cursor-pointer"
                                 >
                                   Add
                                 </button>
@@ -3588,7 +3590,7 @@ export default function AdminPanel({
                           ) : (
                             <div className="space-y-3.5 max-h-60 overflow-y-auto pr-1">
                               {offlineCart.map((item, idx) => (
-                                <div key={`${item.id}-${idx}`} className="flex justify-between items-center text-xs pb-2 border-b border-slate-100 dark:border-brand-teal/5">
+                                <div key={`cart-item-${item.id}-${idx}`} className="flex justify-between items-center text-xs pb-2 border-b border-slate-100 dark:border-brand-teal/5">
                                   <div className="space-y-0.5 max-w-[65%]">
                                     <p className="font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{item.name}</p>
                                     <p className="text-[10px] text-slate-400 italic">{item.serviceType}</p>

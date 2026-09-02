@@ -215,8 +215,22 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     setCart(prev => {
       return prev.map(i => {
         if (`${i.id}-${i.serviceType}` === cartKey) {
-          const newQty = Math.round((i.quantity + change) * 10) / 10;
+          const step = i.unit === 'kg' ? (Math.abs(change) < 1 ? change : change) : change;
+          const newQty = Math.round((i.quantity + step) * 10) / 10;
           return newQty > 0 ? { ...i, quantity: newQty } : null;
+        }
+        return i;
+      }).filter(Boolean) as CartItem[];
+    });
+  };
+
+  const setDirectQuantity = (id: string, type: 'Dry Clean' | 'Steam Iron', rawQty: number) => {
+    const cartKey = `${id}-${type}`;
+    const cleanQty = Math.max(0, Math.round(rawQty * 10) / 10);
+    setCart(prev => {
+      return prev.map(i => {
+        if (`${i.id}-${i.serviceType}` === cartKey) {
+          return cleanQty > 0 ? { ...i, quantity: cleanQty } : null;
         }
         return i;
       }).filter(Boolean) as CartItem[];
@@ -230,8 +244,8 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
 
   const clearCart = () => setCart([]);
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const subtotal = Math.round(cart.reduce((sum, item) => sum + (item.price * item.quantity), 0) * 100) / 100;
+  const totalItemsCount = Math.round(cart.reduce((sum, item) => sum + item.quantity, 0) * 10) / 10;
 
   return (
     <section className="py-20 bg-slate-50/70 dark:bg-brand-deep/20" id="estimator">
@@ -421,28 +435,71 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex items-center border border-slate-200/60 dark:border-brand-teal/20 rounded-md bg-white dark:bg-brand-deep/50">
-                          <button
-                            onClick={() => updateQuantity(item.id, item.serviceType, -1)}
-                            className="p-1 hover:bg-slate-100 dark:hover:bg-brand-dark/40 text-slate-500"
-                          >
-                            <Minus className="h-3 w-3" />
-                          </button>
-                          <span className="px-1 text-xs font-bold font-mono text-slate-800 dark:text-white w-5 text-center">
-                            {item.quantity}
-                          </span>
-                          <button
-                            onClick={() => updateQuantity(item.id, item.serviceType, 1)}
-                            className="p-1 hover:bg-slate-100 dark:hover:bg-brand-dark/40 text-slate-500"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        {item.unit === 'kg' ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, item.serviceType, -0.1)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
+                              title="Subtract 0.1 kg"
+                            >
+                              -0.1
+                            </button>
+                            <div className="flex items-center border border-slate-200/60 dark:border-brand-teal/20 rounded-md bg-white dark:bg-brand-deep/50 px-1 py-0.5">
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0.1"
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  if (!isNaN(val)) setDirectQuantity(item.id, item.serviceType, val);
+                                }}
+                                className="w-10 text-center text-xs font-black font-mono text-slate-800 dark:text-white bg-transparent focus:outline-hidden"
+                              />
+                              <span className="text-[9px] font-mono font-bold text-slate-400">KG</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, item.serviceType, 0.1)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
+                              title="Add 0.1 kg"
+                            >
+                              +0.1
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center border border-slate-200/60 dark:border-brand-teal/20 rounded-md bg-white dark:bg-brand-deep/50">
+                            <button
+                              onClick={() => updateQuantity(item.id, item.serviceType, -1)}
+                              className="p-1 hover:bg-slate-100 dark:hover:bg-brand-dark/40 text-slate-500 cursor-pointer"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <input
+                              type="number"
+                              step="1"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                if (!isNaN(val)) setDirectQuantity(item.id, item.serviceType, val);
+                              }}
+                              className="px-1 text-xs font-bold font-mono text-slate-800 dark:text-white w-7 text-center bg-transparent focus:outline-hidden"
+                            />
+                            <button
+                              onClick={() => updateQuantity(item.id, item.serviceType, 1)}
+                              className="p-1 hover:bg-slate-100 dark:hover:bg-brand-dark/40 text-slate-500 cursor-pointer"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
 
                         <button
                           onClick={() => removeFromCart(item.id, item.serviceType)}
-                          className="text-slate-400 hover:text-red-500 transition-colors p-1"
+                          className="text-slate-400 hover:text-red-500 transition-colors p-1 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
