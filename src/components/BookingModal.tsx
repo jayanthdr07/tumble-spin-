@@ -844,13 +844,9 @@ export default function BookingModal({
     const base = getBaseAfterDynamicPricing();
     const activeSub = getActiveMembership();
 
-    if (activeSub && (activeSub.packageType === 'SMART' || activeSub.packageType === 'SILVER')) {
+    if (selectedPaymentMethod === 'membership' && activeSub && (activeSub.packageType === 'SMART' || activeSub.packageType === 'SILVER')) {
       const discountPercentage = activeSub.packageType === 'SMART' ? 10 : 20;
       return Math.round((base * discountPercentage) / 100);
-    }
-
-    if (selectedPaymentMethod === 'upi_qr') {
-      return Math.round((base * 5) / 100);
     }
 
     return 0;
@@ -3304,7 +3300,7 @@ export default function BookingModal({
                                     <span>
                                       {activeSub 
                                         ? `Prepaid ${activeSub.packageType} Discount (${activeSub.packageType === 'SMART' ? 10 : 20}% off):` 
-                                        : 'Online Self-Booking Discount (5% off):'}
+                                        : 'Membership Discount:'}
                                     </span>
                                     <span className="font-mono">-₹{discountAmt}</span>
                                   </div>
@@ -3383,7 +3379,7 @@ export default function BookingModal({
                                 </p>
                                 <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">
                                   {shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0) ? (
-                                    `Pay a refundable, adjustable deposit of ₹${getGrandTotal()} (5% self-booking discount applied). 100% credited against your final weighed bill.`
+                                    `Pay a refundable, adjustable deposit of ₹${getGrandTotal()}. 100% credited against your final weighed bill.`
                                   ) : (
                                     `Secure transaction of ₹${getGrandTotal()} instantly using GPay, PhonePe, Paytm, or BHIM.`
                                   )}

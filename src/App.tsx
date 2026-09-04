@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { PhoneCall, Instagram, Facebook, X, Gift, Sparkles } from 'lucide-react';
+import { PhoneCall, Instagram, Facebook } from 'lucide-react';
 import Header from './components/Header';
 import Hero from './components/Hero';
-import TrustBar from './components/TrustBar';
 import Services from './components/Services';
 import HowItWorks from './components/HowItWorks';
 import WhyChooseUs from './components/WhyChooseUs';
@@ -98,24 +97,6 @@ export default function App() {
   
   // Theme state: locked to nightlight (dark mode) as requested by user
   const [darkMode, setDarkMode] = useState(true);
-
-  // session-based promotional popup banner
-  const [showPromoPopup, setShowPromoPopup] = useState(false);
-
-  useEffect(() => {
-    const hasSeenPopup = sessionStorage.getItem('tumblespin_seen_promo_popup');
-    if (!hasSeenPopup) {
-      const timer = setTimeout(() => {
-        setShowPromoPopup(true);
-      }, 1500); // Show popup 1.5 seconds after load for smooth entry
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
-  const handleClosePromoPopup = () => {
-    setShowPromoPopup(false);
-    sessionStorage.setItem('tumblespin_seen_promo_popup', 'true');
-  };
 
   // Listen to background storage events (from Firestore real-time sync)
   useEffect(() => {
@@ -224,17 +205,7 @@ export default function App() {
           heroImage={HERO_IMAGE_PATH} 
         />
 
-        {/* 3. Stats Trust Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.7, ease: [0.25, 1, 0.5, 1] }}
-        >
-          <TrustBar />
-        </motion.div>
-
-        {/* 4. Services Section */}
+        {/* Services Section */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -392,68 +363,6 @@ export default function App() {
             initialStep={initialBookingStep}
             dynamicPricing={dynamicPricing}
           />
-        )}
-
-        {showPromoPopup && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ type: 'spring', duration: 0.5 }}
-              className="relative w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white/95 p-6 shadow-2xl dark:border-brand-teal/20 dark:bg-slate-900/95"
-            >
-              {/* Decorative Background Glows */}
-              <div className="absolute -right-12 -top-12 h-36 w-36 rounded-full bg-brand-primary/10 blur-xl dark:bg-brand-accent/10" />
-              <div className="absolute -left-12 -bottom-12 h-36 w-36 rounded-full bg-rose-500/10 blur-xl" />
-
-              {/* Close Button */}
-              <button
-                onClick={handleClosePromoPopup}
-                className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-
-              {/* Content */}
-              <div className="space-y-4 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent">
-                  <Gift className="h-6 w-6 animate-bounce" />
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-primary dark:text-brand-accent font-mono">
-                    Limited Time Offer
-                  </span>
-                  <h3 className="text-xl font-serif font-bold text-slate-900 dark:text-white">
-                    Exclusive 5% Web Booking Promo
-                  </h3>
-                </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                  Skip the hassle! Book any laundry, dry cleaning, or sneaker spa services directly on our website, pay upfront via UPI/QR code, and instantly get a <strong className="text-brand-primary dark:text-brand-accent">Flat 5% Off</strong> your final bill!
-                </p>
-
-                <div className="pt-2 flex flex-col gap-2">
-                  <button
-                    onClick={() => {
-                      handleClosePromoPopup();
-                      handleOpenBooking();
-                    }}
-                    className="w-full py-3 bg-linear-to-r from-brand-primary to-brand-secondary text-xs font-black uppercase tracking-wider text-white shadow-lg hover:shadow-brand-primary/20 dark:from-brand-accent dark:to-brand-teal dark:text-brand-deep rounded-full transition-all hover:scale-[1.01] active:scale-95 cursor-pointer"
-                  >
-                    🚀 Book & Save 5% Instantly
-                  </button>
-                  <button
-                    onClick={handleClosePromoPopup}
-                    className="w-full py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                  >
-                    No thanks, I will pay full price
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
         )}
       </AnimatePresence>
 

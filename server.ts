@@ -673,7 +673,7 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
   // Cashfree Initiate Payment Endpoint for Laundry Booking Orders
   const handleInitiateCashfreePayment = async (req: express.Request, res: express.Response) => {
     try {
-      const { bookingDetails, selectedServices, quantities, dynamicPricing, customPrices } = req.body;
+      const { amount, bookingDetails, selectedServices, quantities, dynamicPricing, customPrices } = req.body;
 
       if (!bookingDetails || !selectedServices || !quantities) {
         return res.status(400).json({ error: 'Missing required order details' });
@@ -696,32 +696,13 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         }
       }
 
-      // Check if user has an active membership for discount (SMART gets 10%, SILVER gets 20%)
-      let finalTotal = totalAfterDynamic;
-      let membershipApplied = false;
+      // Ensure exact price of items selected is charged for payment with no discounts
       const cleanPhone = (bookingDetails.phone || '').replace(/\D/g, '');
-      
-      if (cleanPhone) {
-        try {
-          const memberDoc = await getDoc(doc(db, 'memberships', cleanPhone));
-          if (memberDoc.exists()) {
-            const memberData = memberDoc.data();
-            if (memberData && memberData.status === 'active' && (memberData.packageType === 'SMART' || memberData.packageType === 'SILVER')) {
-              const discountPercentage = memberData.packageType === 'SMART' ? 10 : 20;
-              finalTotal = Math.round(totalAfterDynamic - (totalAfterDynamic * discountPercentage) / 100);
-              membershipApplied = true;
-              console.log(`[Cashfree Backend] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Raw: ${rawBaseTotal}, After Dynamic: ${totalAfterDynamic}, Final: ${finalTotal}`);
-            }
-          }
-        } catch (dbErr) {
-          console.warn('[Cashfree Backend] Failed to read membership for discount, bypassing:', dbErr);
-        }
-      }
+      const finalTotal = (amount && !isNaN(Number(amount)) && Number(amount) > 0)
+        ? Math.round(Number(amount))
+        : totalAfterDynamic;
 
-      if (!membershipApplied) {
-        // Flat 5% self-booking discount for direct online payments if no active membership
-        finalTotal = Math.round(totalAfterDynamic - (totalAfterDynamic * 5) / 100);
-      }
+      console.log(`[Cashfree Backend] Order initiation: RawBase=${rawBaseTotal}, FinalTotal=${finalTotal}, Phone=${cleanPhone}`);
 
       // Generate secure sequential order display ID
       const orderId = await generateNextOrderId();
@@ -1851,30 +1832,7 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
       // Perform a strict server-side check to validate that the transaction amount received matches the booked service amount
       if (quantities && selectedServices) {
         const calculatedTotal = calculateBackendTotal(quantities, selectedServices, dynamicPricing);
-        
-        let finalExpectedTotal = calculatedTotal;
-        let membershipApplied = false;
-        if (bookingDetails && bookingDetails.phone) {
-          const cleanPhone = bookingDetails.phone.replace(/\D/g, '');
-          if (cleanPhone) {
-            try {
-              const memberDoc = await getDoc(doc(db, 'memberships', cleanPhone));
-              if (memberDoc.exists()) {
-                const memberData = memberDoc.data();
-                if (memberData && memberData.status === 'active' && (memberData.packageType === 'SMART' || memberData.packageType === 'SILVER')) {
-                  const discountPercentage = memberData.packageType === 'SMART' ? 10 : 20;
-                  finalExpectedTotal = Math.round(calculatedTotal - (calculatedTotal * discountPercentage) / 100);
-                  membershipApplied = true;
-                  console.log(`[Backend Card Order] Applied membership discount of ${discountPercentage}% for phone ${cleanPhone}. Original: ${calculatedTotal}, Final: ${finalExpectedTotal}`);
-                }
-              }
-            } catch (dbErr) {
-              console.warn('[Backend Card Order] Failed to read membership for discount, bypassing:', dbErr);
-            }
-          }
-        }
-
-        // Standard card orders do not receive the flat 5% UPI QR discount, only active membership discounts.
+        const finalExpectedTotal = calculatedTotal;
 
         if (Math.round(Number(amount)) !== Math.round(finalExpectedTotal)) {
           console.error(`⚠️ create-order amount mismatch! Expected ₹${finalExpectedTotal}, received ₹${amount}`);
