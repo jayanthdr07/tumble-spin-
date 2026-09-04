@@ -4,13 +4,14 @@ import {
   Search, Check, RefreshCw, Sparkles, AlertCircle, 
   Tag, Percent, Save, ArrowRight, ShieldCheck, 
   RotateCcw, Sliders, CheckCircle2, Zap, Info, Filter,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Plus, Edit2, Trash2, X
 } from 'lucide-react';
 import { 
   MASTER_PRICING_CATALOG, 
   MASTER_PRICING_CATEGORIES, 
   MasterPricingItem 
 } from '../data/masterPricingCatalog';
+import { useMasterCatalog } from '../utils/catalogStore';
 import { db } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -52,6 +53,30 @@ export default function MasterPricingManager({
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+
+  // Master Catalog Cloud Store
+  const { items: liveCatalogItems, addItem, updateItem, deleteItem } = useMasterCatalog();
+
+  // Add / Edit Modal States
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [isSubmittingItem, setIsSubmittingItem] = useState(false);
+  const [newItemData, setNewItemData] = useState<{
+    name: string;
+    category: string;
+    defaultPrice: number;
+    unit: string;
+    serviceType: string;
+    description: string;
+  }>({
+    name: '',
+    category: 'men',
+    defaultPrice: 99,
+    unit: 'per pc',
+    serviceType: 'Premium Dry Clean',
+    description: ''
+  });
+
+  const [editingItem, setEditingItem] = useState<MasterPricingItem | null>(null);
 
   // Feedback states
   const [isSaving, setIsSaving] = useState(false);
@@ -205,17 +230,17 @@ export default function MasterPricingManager({
     }
   };
 
-  // Filtered list of items
+  // Filtered list of items from live catalog
   const filteredCatalog = useMemo(() => {
-    return MASTER_PRICING_CATALOG.filter(item => {
+    return liveCatalogItems.filter(item => {
       const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
       const matchesSearch = searchQuery.trim() === '' || 
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.categoryLabel.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.categoryLabel && item.categoryLabel.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
       return matchesCategory && matchesSearch;
     });
-  }, [selectedCategory, searchQuery]);
+  }, [liveCatalogItems, selectedCategory, searchQuery]);
 
   // Group filtered catalog by category
   const groupedCatalog = useMemo(() => {
@@ -230,13 +255,88 @@ export default function MasterPricingManager({
   // Count active overrides
   const totalOverridesCount = useMemo(() => {
     let count = 0;
-    MASTER_PRICING_CATALOG.forEach(item => {
+    liveCatalogItems.forEach(item => {
       if (getItemCurrentValue(item) !== null || getEstimatorSteamValue(item) !== null) {
         count++;
       }
     });
     return count;
-  }, [draftPrices]);
+  }, [liveCatalogItems, draftPrices]);
+
+  // Handle Adding a Brand New Item to Catalog
+  const handleCreateItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemData.name.trim()) {
+      setErrorMsg('Item name is required.');
+      return;
+    }
+    setIsSubmittingItem(true);
+    try {
+      await addItem({
+        name: newItemData.name.trim(),
+        category: newItemData.category,
+        defaultPrice: Number(newItemData.defaultPrice) || 99,
+        unit: newItemData.unit || 'per pc',
+        serviceType: newItemData.serviceType || 'Premium Care',
+        description: newItemData.description.trim()
+      });
+      setShowAddModal(false);
+      setNewItemData({
+        name: '',
+        category: 'men',
+        defaultPrice: 99,
+        unit: 'per pc',
+        serviceType: 'Premium Dry Clean',
+        description: ''
+      });
+      setSuccessMsg('✨ New item added to catalog and synchronized live with Firestore!');
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      console.error('Error adding item:', err);
+      setErrorMsg('Failed to add item. Please try again.');
+    } finally {
+      setIsSubmittingItem(false);
+    }
+  };
+
+  // Handle Updating Existing Item Details
+  const handleUpdateItemDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem || !editingItem.name.trim()) return;
+    setIsSubmittingItem(true);
+    try {
+      await updateItem(editingItem.id, {
+        name: editingItem.name.trim(),
+        category: editingItem.category,
+        defaultPrice: Number(editingItem.defaultPrice) || 0,
+        unit: editingItem.unit || 'per pc',
+        serviceType: editingItem.serviceType || 'Premium Care',
+        description: editingItem.description?.trim() || ''
+      });
+      setEditingItem(null);
+      setSuccessMsg('✨ Item details updated and synced across all pages!');
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      console.error('Error updating item:', err);
+      setErrorMsg('Failed to update item details.');
+    } finally {
+      setIsSubmittingItem(false);
+    }
+  };
+
+  // Handle Deleting an Item
+  const handleDeleteItem = async (item: MasterPricingItem) => {
+    if (window.confirm(`Are you sure you want to remove "${item.name}" from the pricing catalog?`)) {
+      try {
+        await deleteItem(item.id);
+        setSuccessMsg(`Item "${item.name}" was removed from the catalog.`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+      } catch (err) {
+        console.error('Error deleting item:', err);
+        setErrorMsg('Failed to delete item from catalog.');
+      }
+    }
+  };
 
   // Save and Publish Handler
   const handleSaveAndPublish = async () => {
@@ -406,8 +506,17 @@ export default function MasterPricingManager({
 
             <button
               type="button"
+              onClick={() => setShowAddModal(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep shadow-xs hover:opacity-95 active:scale-[0.98] shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add New Item to Catalog</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowSeasonalRules(!showSeasonalRules)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all border ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all border shrink-0 ${
                 showSeasonalRules || localPricingMode !== 'none'
                   ? 'border-brand-primary/40 bg-brand-primary/10 text-brand-primary dark:border-brand-accent/40 dark:bg-brand-accent/10 dark:text-brand-accent'
                   : 'border-slate-200 dark:border-brand-teal/20 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-brand-deep/40'
@@ -424,8 +533,8 @@ export default function MasterPricingManager({
             {MASTER_PRICING_CATEGORIES.map(cat => {
               const isSelected = selectedCategory === cat.id;
               const catItemCount = cat.id === 'all' 
-                ? MASTER_PRICING_CATALOG.length 
-                : MASTER_PRICING_CATALOG.filter(i => i.category === cat.id).length;
+                ? liveCatalogItems.length 
+                : liveCatalogItems.filter(i => i.category === cat.id).length;
 
               return (
                 <button
@@ -596,11 +705,34 @@ export default function MasterPricingManager({
                           <h5 className="text-xs font-extrabold text-slate-800 dark:text-white leading-tight">
                             {item.name}
                           </h5>
-                          {isModified && (
-                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-mono bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                              Custom Rate
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isModified && (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-mono bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                Custom Rate
+                              </span>
+                            )}
+                            {item.isCustom && (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-mono bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                                Custom Item
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem({ ...item })}
+                              className="p-1 rounded-lg text-slate-400 hover:text-brand-primary dark:hover:text-brand-accent hover:bg-slate-200/50 dark:hover:bg-brand-deep/50 transition-colors"
+                              title="Edit item details (Name, Category, Default Price, Unit)"
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteItem(item)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
+                              title="Delete item from catalog"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-400 font-mono">
@@ -765,6 +897,271 @@ export default function MasterPricingManager({
           </button>
         </div>
       </div>
+
+      {/* ➕ ADD NEW ITEM MODAL */}
+      <AnimatePresence>
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-white dark:bg-brand-dark rounded-2xl border border-slate-200 dark:border-brand-teal/20 shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-brand-teal/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-brand-primary/10 dark:bg-brand-accent/10 text-brand-primary dark:text-brand-accent">
+                    <Plus className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider font-mono">
+                      Add New Item to Catalog
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Creates a new item and synchronizes it immediately to Firestore.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateItem} className="p-5 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Item Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Designer Sherwani / Indo-Western"
+                    value={newItemData.name}
+                    onChange={(e) => setNewItemData({ ...newItemData, name: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Category *</label>
+                    <select
+                      value={newItemData.category}
+                      onChange={(e) => setNewItemData({ ...newItemData, category: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    >
+                      {MASTER_PRICING_CATEGORIES.filter(c => c.id !== 'all').map(cat => (
+                        <option key={`opt-cat-${cat.id}`} value={cat.id}>
+                          {cat.icon} {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Base Price (₹) *</label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="any"
+                      placeholder="e.g. 299"
+                      value={newItemData.defaultPrice}
+                      onChange={(e) => setNewItemData({ ...newItemData, defaultPrice: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Unit / Pricing Metric</label>
+                    <input
+                      type="text"
+                      placeholder="per pc, per pair, per kg"
+                      value={newItemData.unit}
+                      onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Service Type</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Premium Dry Clean"
+                      value={newItemData.serviceType}
+                      onChange={(e) => setNewItemData({ ...newItemData, serviceType: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Description (Optional)</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Care specifics or fabric details..."
+                    value={newItemData.description}
+                    onChange={(e) => setNewItemData({ ...newItemData, description: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-brand-teal/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingItem}
+                    className="px-5 py-2 rounded-xl bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-xs hover:opacity-95"
+                  >
+                    {isSubmittingItem ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    <span>Save to Catalog</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ✏️ EDIT ITEM DETAILS MODAL */}
+      <AnimatePresence>
+        {editingItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-white dark:bg-brand-dark rounded-2xl border border-slate-200 dark:border-brand-teal/20 shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 dark:border-brand-teal/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-brand-primary/10 dark:bg-brand-accent/10 text-brand-primary dark:text-brand-accent">
+                    <Edit2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider font-mono">
+                      Edit Item Details
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      ID: {editingItem.id}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateItemDetails} className="p-5 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Item Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingItem.name}
+                    onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Category *</label>
+                    <select
+                      value={editingItem.category}
+                      onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    >
+                      {MASTER_PRICING_CATEGORIES.filter(c => c.id !== 'all').map(cat => (
+                        <option key={`edit-cat-${cat.id}`} value={cat.id}>
+                          {cat.icon} {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Default Base Price (₹) *</label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="any"
+                      value={editingItem.defaultPrice}
+                      onChange={(e) => setEditingItem({ ...editingItem, defaultPrice: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Unit</label>
+                    <input
+                      type="text"
+                      value={editingItem.unit}
+                      onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Service Type</label>
+                    <input
+                      type="text"
+                      value={editingItem.serviceType || ''}
+                      onChange={(e) => setEditingItem({ ...editingItem, serviceType: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Description</label>
+                  <textarea
+                    rows={2}
+                    value={editingItem.description || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, description: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-brand-teal/20 bg-slate-50/50 dark:bg-brand-deep/30 text-slate-800 dark:text-white focus:outline-hidden focus:border-brand-primary"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-brand-teal/10">
+                  <button
+                    type="button"
+                    onClick={() => setEditingItem(null)}
+                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingItem}
+                    className="px-5 py-2 rounded-xl bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-xs hover:opacity-95"
+                  >
+                    {isSubmittingItem ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    <span>Update Item</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

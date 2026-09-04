@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CheckCircle, ArrowRight, Info, HelpCircle, ShieldCheck, 
-  Sparkles, Shirt, Scissors, Layers, Home, Footprints, Briefcase, ShoppingBag
+  Sparkles, Shirt, Scissors, Layers, Home, Footprints, Briefcase, ShoppingBag, Baby, Tag
 } from 'lucide-react';
 import { getItemIcon } from '../utils/itemIcons';
+import { useMasterCatalog } from '../utils/catalogStore';
 
 interface PricingPreviewProps {
   onOpenBooking: () => void;
@@ -139,8 +140,82 @@ const PRICING_DATA: PriceCategory[] = [
 
 export default function PricingPreview({ onOpenBooking, dynamicPricing }: PricingPreviewProps) {
   const [activeCategory, setActiveCategory] = useState<string>('laundry');
+  const { items: liveCatalogItems } = useMasterCatalog();
 
-  const selectedCategory = PRICING_DATA.find(c => c.id === activeCategory) || PRICING_DATA[0];
+  // Dynamically merge live catalog items with base PRICING_DATA
+  const mergedCategories = useMemo(() => {
+    // Check for custom items added to existing categories
+    const baseCats = PRICING_DATA.map(cat => {
+      const catIdNorm = cat.id === 'woolen' ? 'woolens' : cat.id;
+      
+      const customItemsInCat = liveCatalogItems.filter(item => {
+        const itemCatNorm = item.category === 'woolen' ? 'woolens' : item.category;
+        return itemCatNorm === catIdNorm && item.isCustom;
+      });
+
+      if (customItemsInCat.length === 0) return cat;
+
+      const dynamicPriceItems: PriceItem[] = customItemsInCat.map(ci => ({
+        name: ci.name + (ci.unit && ci.unit !== 'per pc' ? ` (${ci.unit})` : ''),
+        dryClean: ci.defaultPrice ? `₹${ci.defaultPrice}` : 'NA',
+        steamIron: ci.estimatorSteamIronDefault ? `₹${ci.estimatorSteamIronDefault}` : (cat.columns.includes('Steam Iron') ? '₹40' : undefined)
+      }));
+
+      return {
+        ...cat,
+        items: [...cat.items, ...dynamicPriceItems]
+      };
+    });
+
+    // Check if there are custom items in other categories like 'kids' or custom sections
+    const knownCatIds = new Set(baseCats.map(c => c.id === 'woolen' ? 'woolens' : c.id));
+    const extraCategories: PriceCategory[] = [];
+
+    // Check kids
+    const kidsItems = liveCatalogItems.filter(i => i.category === 'kids' && i.isCustom);
+    if (kidsItems.length > 0) {
+      extraCategories.push({
+        id: 'kids',
+        name: 'Kids Wear',
+        delivery: 'Delivery within 3 days',
+        columns: ['Dry Clean', 'Steam Iron'],
+        icon: <Baby className="h-5 w-5" />,
+        items: kidsItems.map(ci => ({
+          name: ci.name + (ci.unit && ci.unit !== 'per pc' ? ` (${ci.unit})` : ''),
+          dryClean: ci.defaultPrice ? `₹${ci.defaultPrice}` : 'NA',
+          steamIron: ci.estimatorSteamIronDefault ? `₹${ci.estimatorSteamIronDefault}` : '₹40'
+        }))
+      });
+      knownCatIds.add('kids');
+    }
+
+    // Check any other custom sections
+    const remainingCustom = liveCatalogItems.filter(i => i.isCustom && !knownCatIds.has(i.category));
+    const otherGroups = new Map<string, typeof remainingCustom>();
+    remainingCustom.forEach(item => {
+      const list = otherGroups.get(item.category) || [];
+      list.push(item);
+      otherGroups.set(item.category, list);
+    });
+
+    otherGroups.forEach((itemsInGroup, catName) => {
+      extraCategories.push({
+        id: catName,
+        name: itemsInGroup[0]?.categoryLabel || catName.charAt(0).toUpperCase() + catName.slice(1),
+        delivery: 'Delivery within 3 days',
+        columns: ['Rate / Price'],
+        icon: <Tag className="h-5 w-5" />,
+        items: itemsInGroup.map(ci => ({
+          name: ci.name + (ci.unit && ci.unit !== 'per pc' ? ` (${ci.unit})` : ''),
+          dryClean: ci.defaultPrice ? `₹${ci.defaultPrice}` : 'NA'
+        }))
+      });
+    });
+
+    return [...baseCats, ...extraCategories];
+  }, [liveCatalogItems]);
+
+  const selectedCategory = mergedCategories.find(c => c.id === activeCategory) || mergedCategories[0];
 
   const adjustPriceString = (priceStr: string) => {
     if (!dynamicPricing || dynamicPricing.mode === 'none' || !dynamicPricing.percentage) return priceStr;
@@ -184,11 +259,11 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
 
         {/* Pricing Category Filters - Tabs */}
         <div className="flex flex-wrap justify-center gap-2.5 mb-12" id="pricing-category-filters">
-          {PRICING_DATA.map((cat, idx) => (
+          {mergedCategories.map((cat, idx) => (
             <button
               key={`price-cat-${cat.id}-${idx}`}
               onClick={() => setActiveCategory(cat.id)}
-              className={`flex items-center gap-2 px-5 py-3 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300 ${
+              className={`flex items-center gap-2 px-5 py-3 rounded-full text-xs font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer ${
                 activeCategory === cat.id
                   ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20 dark:bg-brand-teal dark:text-white'
                   : 'bg-white text-slate-700 hover:bg-brand-accent/10 dark:bg-brand-dark/40 dark:text-slate-200 dark:hover:bg-brand-teal/20 border border-brand-accent/40 dark:border-brand-accent/20'

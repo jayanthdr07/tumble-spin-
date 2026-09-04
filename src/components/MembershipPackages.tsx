@@ -3,12 +3,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, CheckCircle, ArrowRight, User, Phone, Mail, 
   Search, ShieldCheck, Award, Zap, Check, AlertCircle, RefreshCw, X,
-  ExternalLink, Clock, Lock
+  ExternalLink, Clock, Lock, CreditCard, Send, CheckCircle2, ChevronRight
 } from 'lucide-react';
 import WOMAN_IMAGE_PATH from '../assets/images/smiling_woman_thumbs_up_1783847990839.jpg';
 import { useBusinessInfo } from '../utils/useBusinessInfo';
 import { db } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, onSnapshot, getDoc } from 'firebase/firestore';
 import { robustFetch } from '../utils/robustFetch';
 
 interface MembershipPackagesProps {
@@ -24,7 +24,16 @@ export interface MembershipSubscription {
   balance: number;
   createdAt: string;
   status: 'active' | 'cancelled';
+  paymentMethod?: string;
+  upiRefNo?: string;
+  merchantTransactionId?: string;
 }
+
+// Helper: 10-digit Indian phone normalization
+const normalize10Digits = (val: string): string => {
+  const digits = (val || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+};
 
 export default function MembershipPackages({ onOpenBooking }: MembershipPackagesProps) {
   const businessInfo = useBusinessInfo();
@@ -35,30 +44,36 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
   const [searchPhone, setSearchPhone] = useState('');
   const [lookupResult, setLookupResult] = useState<MembershipSubscription | null>(null);
   const [searched, setSearched] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Form States
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [subscribeStep, setSubscribeStep] = useState(1); // 1: Info/Form, 2: Payment, 3: Success
+  const [subscribeStep, setSubscribeStep] = useState<1 | 2 | 3>(1); // 1: Info/Form, 2: Payment, 3: Success
 
   // Real Cashfree Gateway Payment States
   const [merchantTransactionId, setMerchantTransactionId] = useState('');
   const [payUrl, setPayUrl] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [upiIntent, setUpiIntent] = useState('');
-  const [isSimulatingCashfree, setIsSimulatingCashfree] = useState(false);
+
+  // Status Check States (Real Gateway Verification Only)
+  const [isCheckingPayment, setIsCheckingPayment] = useState(false);
+  const [statusFeedback, setStatusFeedback] = useState<{ type: 'info' | 'error' | 'success'; message: string } | null>(null);
 
   const [qrExpired, setQrExpired] = useState(false);
   const [qrTimeLeft, setQrTimeLeft] = useState<number | null>(600); // 10 minutes
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
 
-  // List of memberships loaded from local storage (synced to Firestore)
+  // List of memberships loaded from local storage and real-time Firestore
   const [memberships, setMemberships] = useState<MembershipSubscription[]>([]);
 
   useEffect(() => {
-    const loadMemberships = () => {
+    // 1. Initial local load
+    const loadMembershipsFromLocal = () => {
       const saved = localStorage.getItem('tumblespin_memberships');
       if (saved) {
         try {
@@ -68,21 +83,85 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
         }
       }
     };
-    loadMemberships();
+    loadMembershipsFromLocal();
+    window.addEventListener('storage', loadMembershipsFromLocal);
 
-    // Listen to local storage changes
-    window.addEventListener('storage', loadMemberships);
-    return () => window.removeEventListener('storage', loadMemberships);
+    // 2. Real-time Firestore sync
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = onSnapshot(collection(db, 'memberships'), (snapshot) => {
+        const liveSubs: MembershipSubscription[] = [];
+        snapshot.forEach((docSnap) => {
+          liveSubs.push({ id: docSnap.id, ...docSnap.data() } as any);
+        });
+        if (liveSubs.length > 0) {
+          setMemberships(liveSubs);
+          localStorage.setItem('tumblespin_memberships', JSON.stringify(liveSubs));
+        }
+      }, (err) => {
+        console.warn('Firestore memberships subscription listener notice:', err);
+      });
+    } catch (fsErr) {
+      console.warn('Firestore memberships sync offline:', fsErr);
+    }
+
+    return () => {
+      window.removeEventListener('storage', loadMembershipsFromLocal);
+      unsubscribe();
+    };
   }, []);
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchPhone) return;
     
-    const formattedPhone = searchPhone.replace(/\D/g, '');
-    const found = memberships.find(m => m.phone.replace(/\D/g, '') === formattedPhone && m.status === 'active');
-    setLookupResult(found || null);
+    setIsSearching(true);
     setSearched(true);
+    const cleanPhone = normalize10Digits(searchPhone);
+
+    // 1. Try local list
+    const foundLocal = memberships.find(m => normalize10Digits(m.phone) === cleanPhone && m.status === 'active');
+    if (foundLocal) {
+      setLookupResult(foundLocal);
+      setIsSearching(false);
+      return;
+    }
+
+    // 2. Query Firestore / backend API live
+    try {
+      const snap = await getDoc(doc(db, 'memberships', cleanPhone));
+      if (snap.exists() && snap.data()?.status === 'active') {
+        const liveMem = snap.data() as MembershipSubscription;
+        setLookupResult(liveMem);
+        // Sync into local state
+        setMemberships(prev => {
+          const filtered = prev.filter(m => normalize10Digits(m.phone) !== cleanPhone);
+          const updated = [...filtered, liveMem];
+          localStorage.setItem('tumblespin_memberships', JSON.stringify(updated));
+          return updated;
+        });
+        setIsSearching(false);
+        return;
+      }
+    } catch (err) {
+      console.warn('Direct Firestore lookup fallback:', err);
+    }
+
+    // 3. Backend lookup API fallback
+    try {
+      const resp = await robustFetch(`/api/memberships/lookup/${cleanPhone}`);
+      const data = await resp.json();
+      if (data.success && data.found && data.membership) {
+        setLookupResult(data.membership);
+        setIsSearching(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('API lookup fallback notice:', apiErr);
+    }
+
+    setLookupResult(null);
+    setIsSearching(false);
   };
 
   useEffect(() => {
@@ -111,26 +190,27 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
           setPaymentStatus('success');
 
           const expectedAmount = selectedPackage === 'SMART' ? 2000 : 5000;
-          const cleanPhone = phone.replace(/\D/g, '');
+          const cleanPhone = normalize10Digits(phone);
           const newSub: MembershipSubscription = {
             phone: cleanPhone,
-            fullName,
-            email,
+            fullName: fullName.trim(),
+            email: email.trim(),
             packageType: selectedPackage,
             rechargeAmount: expectedAmount,
             balance: expectedAmount,
             createdAt: new Date().toISOString(),
-            status: 'active'
+            status: 'active',
+            merchantTransactionId
           };
 
           try {
-            await setDoc(doc(db, 'memberships', cleanPhone), newSub);
+            await setDoc(doc(db, 'memberships', cleanPhone), newSub, { merge: true });
           } catch (fsErr) {
-            console.warn('Direct Firestore membership write failed:', fsErr);
+            console.warn('Direct Firestore membership write warning:', fsErr);
           }
 
           setMemberships(prev => {
-            const filtered = prev.filter(m => m.phone.replace(/\D/g, '') !== cleanPhone);
+            const filtered = prev.filter(m => normalize10Digits(m.phone) !== cleanPhone);
             const nextList = [...filtered, newSub];
             localStorage.setItem('tumblespin_memberships', JSON.stringify(nextList));
             window.dispatchEvent(new Event('storage'));
@@ -152,7 +232,26 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
   const handleSubscribeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !phone || !email) return;
+    setFormError(null);
+
+    const cleanName = fullName.trim();
+    const cleanPhone = normalize10Digits(phone);
+    const cleanEmail = email.trim();
+
+    if (!cleanName) {
+      setFormError('Please enter your full name.');
+      return;
+    }
+
+    if (!cleanPhone || cleanPhone.length < 10) {
+      setFormError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setFormError('Please enter a valid email address.');
+      return;
+    }
 
     setIsSubmitting(true);
     const amount = selectedPackage === 'SMART' ? 2000 : 5000;
@@ -163,16 +262,16 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageType: selectedPackage,
-          fullName,
-          phone,
-          email,
+          fullName: cleanName,
+          phone: cleanPhone,
+          email: cleanEmail,
           amount
         })
       });
 
       const data = await response.json();
       if (!data.success) {
-        alert(data.error || 'Failed to initiate Cashfree payment.');
+        setFormError(data.error || 'Failed to initiate payment. Please try again.');
         setIsSubmitting(false);
         return;
       }
@@ -186,18 +285,83 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
       setQrExpired(false);
       setQrTimeLeft(600);
       setPaymentStatus('idle');
+      setStatusFeedback(null);
     } catch (err: any) {
       console.error('[Membership Cashfree Initiation Error]:', err);
-      alert('Failed to connect to payment server. Please try again.');
+      setFormError('Unable to connect to payment server. Please check your network and try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Real Gateway Verification Check (No fake payments allowed)
+  const handleCheckPaymentStatus = async () => {
+    if (!merchantTransactionId) return;
+    setIsCheckingPayment(true);
+    setStatusFeedback(null);
+
+    try {
+      const response = await robustFetch(`/api/cashfree/status/${encodeURIComponent(merchantTransactionId)}`);
+      const data = await response.json();
+
+      if (data.success && (data.paymentStatus === 'paid' || data.verified === true)) {
+        setPaymentStatus('success');
+        setStatusFeedback({ type: 'success', message: '✨ Payment verified by Cashfree gateway! Activating subscription...' });
+
+        const expectedAmount = selectedPackage === 'SMART' ? 2000 : 5000;
+        const cleanPhone = normalize10Digits(phone);
+        const newSub: MembershipSubscription = {
+          phone: cleanPhone,
+          fullName: fullName.trim() || 'Valued Member',
+          email: email.trim() || 'client@tumblespin.com',
+          packageType: selectedPackage,
+          rechargeAmount: expectedAmount,
+          balance: expectedAmount,
+          createdAt: new Date().toISOString(),
+          status: 'active',
+          merchantTransactionId
+        };
+
+        try {
+          await setDoc(doc(db, 'memberships', cleanPhone), newSub, { merge: true });
+        } catch (fsErr) {
+          console.warn('Direct Firestore membership write warning:', fsErr);
+        }
+
+        setMemberships(prev => {
+          const filtered = prev.filter(m => normalize10Digits(m.phone) !== cleanPhone);
+          const nextList = [...filtered, newSub];
+          localStorage.setItem('tumblespin_memberships', JSON.stringify(nextList));
+          window.dispatchEvent(new Event('storage'));
+          return nextList;
+        });
+
+        setTimeout(() => {
+          setIsCheckingPayment(false);
+          setSubscribeStep(3); // Move to Step 3 Celebration Screen!
+          setPaymentStatus('idle');
+        }, 1200);
+      } else {
+        setIsCheckingPayment(false);
+        setStatusFeedback({
+          type: 'error',
+          message: 'Payment has not been confirmed yet by Cashfree. If you have already paid in your UPI or card app, please wait a few seconds and tap "Check Status Now" again.'
+        });
+      }
+    } catch (err) {
+      console.error('[Cashfree Status Check Error]:', err);
+      setIsCheckingPayment(false);
+      setStatusFeedback({
+        type: 'error',
+        message: 'Could not connect to payment gateway to check status. Please check your network.'
+      });
+    }
+  };
+
   const handleCancelSubscription = (phoneToCancel: string) => {
-    const cleanPhone = phoneToCancel.replace(/\D/g, '');
+    const cleanPhone = normalize10Digits(phoneToCancel);
     const updated = memberships.map(m => {
-      if (m.phone.replace(/\D/g, '') === cleanPhone) {
+      if (normalize10Digits(m.phone) === cleanPhone) {
         return { ...m, status: 'cancelled' as const };
       }
       return m;
@@ -205,8 +369,12 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
     setMemberships(updated);
     localStorage.setItem('tumblespin_memberships', JSON.stringify(updated));
     window.dispatchEvent(new Event('storage'));
+
+    try {
+      setDoc(doc(db, 'memberships', cleanPhone), { status: 'cancelled' }, { merge: true });
+    } catch (e) {}
     
-    if (lookupResult && lookupResult.phone.replace(/\D/g, '') === cleanPhone) {
+    if (lookupResult && normalize10Digits(lookupResult.phone) === cleanPhone) {
       setLookupResult(prev => prev ? { ...prev, status: 'cancelled' as const } : null);
     }
   };
@@ -217,6 +385,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
     setFullName('');
     setPhone('');
     setEmail('');
+    setFormError(null);
     setMerchantTransactionId('');
     setPayUrl('');
     setQrCodeUrl('');
@@ -227,11 +396,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
     setShowSubscribeModal(true);
   };
 
-  const razorpayUrl = businessInfo.razorpayUrl || 'https://razorpay.me/@tumblespin';
   const rechargeAmount = selectedPackage === 'SMART' ? 2000 : 5000;
-  const paymentLink = razorpayUrl.includes('razorpay.me') 
-    ? razorpayUrl 
-    : `${razorpayUrl}${razorpayUrl.includes('?') ? '&' : '?'}amount=${rechargeAmount}`;
 
   return (
     <section 
@@ -268,233 +433,237 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               
               {/* SMART Card */}
-              <motion.div 
-                whileHover={{ y: -5 }}
-                className="relative bg-white dark:bg-brand-dark rounded-3xl p-8 border-2 border-slate-100 dark:border-brand-accent/10 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
-                id="membership-card-smart"
-              >
-                {/* Decorative background circle */}
-                <div className="absolute -top-10 -right-10 w-32 h-32 bg-slate-50 dark:bg-slate-800/40 rounded-full -z-10" />
-
+              <div className="relative rounded-3xl p-8 bg-[#1E3A8A] text-white shadow-xl flex flex-col justify-between overflow-hidden border border-blue-900/50 group transition-all duration-300 hover:shadow-2xl">
                 <div className="space-y-6">
-                  {/* Package Badge */}
-                  <div className="inline-block bg-[#1E3A8A] text-white text-[10px] font-bold tracking-widest uppercase px-4 py-1.5 rounded-full">
-                    SMART
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-mono font-bold tracking-widest uppercase px-3 py-1 bg-white/10 rounded-full border border-white/20">
+                      Standard Tier
+                    </span>
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-200">
+                      Prepaid
+                    </span>
                   </div>
-                  
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-slate-400 dark:text-slate-500 font-mono">Recharge with</p>
-                    <p className="text-4xl font-serif font-bold text-slate-900 dark:text-white">₹ 2000</p>
-                    <p className="text-sm font-semibold text-slate-400 dark:text-slate-500 font-mono mt-1">and get</p>
-                    <p className="text-3xl font-serif font-bold text-brand-primary dark:text-brand-accent">10% off</p>
-                    <p className="text-xs font-bold text-slate-400 dark:text-slate-500 font-mono">on all orders</p>
+
+                  <div>
+                    <h3 className="text-3xl font-serif font-bold tracking-tight">SMART</h3>
+                    <div className="mt-4 flex items-baseline gap-1">
+                      <span className="text-xs uppercase font-mono tracking-widest text-blue-200">Recharge with</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-4xl font-bold font-serif">₹ 2000</span>
+                    </div>
+                  </div>
+
+                  <div className="py-4 border-y border-white/15 space-y-1">
+                    <span className="text-xs uppercase tracking-wider text-blue-200 font-mono">and get</span>
+                    <div className="text-3xl font-extrabold text-white font-serif tracking-tight">
+                      10% off
+                    </div>
+                    <span className="text-xs text-blue-200 font-medium">on all orders</span>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleOpenSubscribe('SMART')}
-                  className="mt-8 w-full py-3.5 px-6 rounded-full border-2 border-brand-primary hover:bg-brand-primary hover:text-white text-brand-primary dark:border-brand-accent dark:text-brand-accent dark:hover:bg-brand-accent dark:hover:text-brand-deep text-xs font-extrabold tracking-wider uppercase transition-all duration-300"
-                  id="subscribe-btn-smart"
-                >
-                  SUBSCRIBE NOW
-                </button>
-              </motion.div>
+                <div className="pt-8">
+                  <button
+                    onClick={() => handleOpenSubscribe('SMART')}
+                    className="w-full py-3.5 px-6 rounded-xl bg-white text-[#1E3A8A] font-bold text-xs uppercase tracking-wider hover:bg-blue-50 active:scale-98 transition-all duration-200 shadow-md flex items-center justify-center gap-2 group-hover:gap-3 cursor-pointer"
+                  >
+                    <span>SUBSCRIBE NOW</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
 
               {/* SILVER Card */}
-              <motion.div 
-                whileHover={{ y: -5 }}
-                className="relative bg-white dark:bg-brand-dark rounded-3xl p-8 border-2 border-slate-100 dark:border-brand-accent/10 shadow-lg hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
-                id="membership-card-silver"
-              >
-                {/* Decorative background circle */}
-                <div className="absolute -top-10 -right-10 w-32 h-32 bg-slate-50 dark:bg-slate-800/40 rounded-full -z-10" />
-
+              <div className="relative rounded-3xl p-8 bg-slate-900 dark:bg-[#0B1528] text-white shadow-xl flex flex-col justify-between overflow-hidden border border-slate-700/50 group transition-all duration-300 hover:shadow-2xl">
                 <div className="space-y-6">
-                  {/* Package Badge */}
-                  <div className="inline-block bg-slate-800 text-white text-[10px] font-bold tracking-widest uppercase px-4 py-1.5 rounded-full dark:bg-slate-700">
-                    SILVER
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-mono font-bold tracking-widest uppercase px-3 py-1 bg-brand-accent/20 text-brand-accent rounded-full border border-brand-accent/30">
+                      Popular Tier
+                    </span>
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+                      Prepaid
+                    </span>
                   </div>
-                  
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-slate-400 dark:text-slate-500 font-mono">Recharge with</p>
-                    <p className="text-4xl font-serif font-bold text-slate-900 dark:text-white">₹ 5000</p>
-                    <p className="text-sm font-semibold text-slate-400 dark:text-slate-500 font-mono mt-1">and get</p>
-                    <p className="text-3xl font-serif font-bold text-brand-teal dark:text-brand-accent">20% off</p>
-                    <p className="text-xs font-bold text-slate-400 dark:text-slate-500 font-mono">on all orders</p>
+
+                  <div>
+                    <h3 className="text-3xl font-serif font-bold tracking-tight text-white">SILVER</h3>
+                    <div className="mt-4 flex items-baseline gap-1">
+                      <span className="text-xs uppercase font-mono tracking-widest text-slate-400">Recharge with</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-4xl font-bold font-serif text-brand-accent">₹ 5000</span>
+                    </div>
+                  </div>
+
+                  <div className="py-4 border-y border-white/10 space-y-1">
+                    <span className="text-xs uppercase tracking-wider text-slate-400 font-mono">and get</span>
+                    <div className="text-3xl font-extrabold text-white font-serif tracking-tight">
+                      20% off
+                    </div>
+                    <span className="text-xs text-slate-400 font-medium">on all orders</span>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleOpenSubscribe('SILVER')}
-                  className="mt-8 w-full py-3.5 px-6 rounded-full border-2 border-brand-primary bg-brand-primary text-white hover:bg-brand-secondary dark:border-brand-accent dark:bg-brand-accent dark:text-brand-deep dark:hover:bg-white text-xs font-extrabold tracking-wider uppercase transition-all duration-300 shadow-md shadow-brand-primary/15"
-                  id="subscribe-btn-silver"
-                >
-                  SUBSCRIBE NOW
-                </button>
-              </motion.div>
-
-            </div>
-
-            {/* Bullet Points of Benefits */}
-            <div className="space-y-4" id="membership-benefits-list">
-              {[
-                "No Joining Fee – 100% of your amount is usable",
-                "No Expiry – Use anytime at your convenience",
-                "Valid at all 1500+ Tumblespin stores across India",
-                "Cancel Anytime – Get full balance refund"
-              ].map((benefit, idx) => (
-                <div key={`benefit-${idx}`} className="flex items-start gap-3">
-                  <span className="text-brand-primary dark:text-brand-accent mt-1">▶</span>
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    {benefit}
-                  </p>
+                <div className="pt-8">
+                  <button
+                    onClick={() => handleOpenSubscribe('SILVER')}
+                    className="w-full py-3.5 px-6 rounded-xl bg-brand-accent text-brand-deep font-bold text-xs uppercase tracking-wider hover:bg-brand-accent/90 active:scale-98 transition-all duration-200 shadow-md flex items-center justify-center gap-2 group-hover:gap-3 cursor-pointer"
+                  >
+                    <span>SUBSCRIBE NOW</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
                 </div>
-              ))}
+              </div>
+
             </div>
 
-            {/* Primary Action Row */}
-            <div className="flex flex-wrap gap-4 pt-4">
-              <button
-                onClick={() => handleOpenSubscribe('SMART')}
-                className="px-8 py-4 bg-brand-primary text-white hover:bg-brand-secondary dark:bg-brand-accent dark:text-brand-deep dark:hover:bg-white font-extrabold text-xs tracking-wider uppercase rounded-full shadow-lg shadow-brand-primary/20 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-                id="main-subscribe-pkg-btn"
-              >
-                Subscribe Package
-              </button>
-              <button
-                onClick={onOpenBooking}
-                className="px-8 py-4 bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 font-extrabold text-xs tracking-wider uppercase rounded-full shadow-lg shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-                id="main-schedule-pickup-btn"
-              >
-                Schedule Free Pickup
-              </button>
+            {/* Micro Feature Bullet points row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex items-center gap-3 p-4 rounded-2xl bg-white dark:bg-brand-dark border border-slate-100 dark:border-brand-teal/10 shadow-xs">
+                <div className="h-8 w-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600 dark:text-brand-accent shrink-0">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <div className="text-xs leading-snug">
+                  <strong className="block font-bold text-slate-800 dark:text-white">No Joining Fee</strong>
+                  <span className="text-slate-500 dark:text-slate-400">100% of your amount is usable</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-4 rounded-2xl bg-white dark:bg-brand-dark border border-slate-100 dark:border-brand-teal/10 shadow-xs">
+                <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-brand-primary dark:text-blue-400 shrink-0">
+                  <Zap className="h-4 w-4" />
+                </div>
+                <div className="text-xs leading-snug">
+                  <strong className="block font-bold text-slate-800 dark:text-white">Lifetime Validity</strong>
+                  <span className="text-slate-500 dark:text-slate-400">Your wallet balance never expires</span>
+                </div>
+              </div>
             </div>
 
-            {/* Membership Lookup Section */}
-            <div className="p-6 bg-white dark:bg-brand-dark rounded-2xl border border-slate-100 dark:border-brand-accent/15 shadow-md max-w-lg">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Search className="h-4 w-4 text-brand-primary dark:text-brand-accent" />
+            {/* Lookup Section */}
+            <div className="p-6 rounded-3xl bg-white dark:bg-brand-dark border border-slate-100 dark:border-brand-teal/10 shadow-sm space-y-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 font-mono">
+                <Search className="h-3.5 w-3.5" />
                 Already a member? Check your subscription
-              </h3>
-              <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mb-4">
-                Enter your mobile number to search active memberships and view your available balance.
-              </p>
-              
+              </div>
+
               <form onSubmit={handleSearch} className="flex gap-2">
-                <div className="relative flex-grow">
-                  <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <input
-                    type="tel"
-                    placeholder="Enter Phone Number"
-                    value={searchPhone}
-                    onChange={(e) => setSearchPhone(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-semibold text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                    required
-                  />
-                </div>
+                <input
+                  type="tel"
+                  value={searchPhone}
+                  onChange={(e) => setSearchPhone(e.target.value)}
+                  placeholder="Enter 10-digit registered phone"
+                  className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary dark:focus:ring-brand-accent"
+                />
                 <button
                   type="submit"
-                  className="px-6 py-3 bg-brand-primary dark:bg-brand-accent dark:text-brand-deep text-white text-xs font-bold rounded-full hover:opacity-90 active:scale-95 transition-all"
+                  disabled={isSearching}
+                  className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-xs font-bold uppercase tracking-wider hover:opacity-90 active:scale-98 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  Verify
+                  {isSearching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                  Check
                 </button>
               </form>
 
-              {/* Lookup Result Panel */}
-              <AnimatePresence mode="wait">
-                {searched && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mt-4 pt-4 border-t border-slate-100 dark:border-brand-accent/10"
-                  >
-                    {lookupResult ? (
-                      <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 p-4 border border-emerald-200/50 dark:border-emerald-500/20 space-y-3">
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-400 font-bold text-xs">
-                            <ShieldCheck className="h-4 w-4" />
-                            Active {lookupResult.packageType} Member
-                          </div>
-                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold">
-                            {lookupResult.packageType === 'SMART' ? '10% Discount' : '20% Discount'}
+              {searched && (
+                <div className="animate-fadeIn">
+                  {lookupResult ? (
+                    <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                            Active {lookupResult.packageType} Member: {lookupResult.fullName}
                           </span>
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <p className="text-slate-400 dark:text-slate-500 font-medium">Name</p>
-                            <p className="font-bold text-slate-800 dark:text-white">{lookupResult.fullName}</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-400 dark:text-slate-500 font-medium">Prepaid Balance</p>
-                            <p className="font-bold text-slate-800 dark:text-white font-mono">₹{lookupResult.balance}</p>
-                          </div>
-                        </div>
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Prepaid Balance: <strong>₹{lookupResult.balance}</strong> (Original: ₹{lookupResult.rechargeAmount}) • Guaranteed {lookupResult.packageType === 'SMART' ? '10%' : '20%'} discount on all future bookings.
+                        </p>
+                      </div>
 
-                        <div className="flex justify-between items-center pt-2">
-                          <p className="text-[10px] text-slate-400 font-mono">
-                            Subscribed on: {new Date(lookupResult.createdAt).toLocaleDateString()}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => handleCancelSubscription(lookupResult.phone)}
-                            className="text-[10px] text-rose-500 hover:underline font-bold"
-                          >
-                            Cancel & Refund
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('Are you sure you want to cancel this membership? Remaining balance can be claimed at store.')) {
+                              handleCancelSubscription(lookupResult.phone);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-[10px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50 rounded-lg border border-rose-200 dark:border-rose-900/50 transition-all cursor-pointer"
+                        >
+                          Cancel Plan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onOpenBooking}
+                          className="px-3 py-1.5 text-[10px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all cursor-pointer"
+                        >
+                          Book With Discount
+                        </button>
                       </div>
-                    ) : (
-                      <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-4 border border-amber-200/50 dark:border-amber-500/20 flex items-start gap-2.5">
-                        <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-xs font-bold text-amber-800 dark:text-amber-400">
-                            No Active Membership Found
-                          </p>
-                          <p className="text-[10px] text-amber-700 dark:text-amber-500 mt-1">
-                            No active SMART or SILVER package found under this phone number. Get one above to start saving immediately!
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between">
+                      <span>No active membership found for <strong>{searchPhone}</strong>. Subscribe today to unlock up to 20% off!</span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSubscribe('SMART')}
+                        className="font-bold underline uppercase text-[10px] ml-2 shrink-0"
+                      >
+                        Subscribe Now
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>
 
-          {/* Right Column: Smiling Woman Portrait */}
-          <div className="lg:col-span-5 relative flex flex-col justify-stretch h-full w-full">
-            {/* Soft decorative background glow circles */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[110%] h-[110%] bg-radial from-brand-primary/10 via-transparent to-transparent filter blur-3xl -z-10 rounded-full" />
-            
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
-              className="relative rounded-3xl overflow-hidden w-full h-full min-h-[500px] lg:min-h-full border-4 border-white dark:border-brand-dark shadow-2xl flex flex-col justify-end"
-              id="membership-image-container"
-            >
-              <img 
-                src={WOMAN_IMAGE_PATH} 
-                alt="Smiling Indian Woman Thumbs Up" 
-                className="absolute inset-0 w-full h-full object-cover hover:scale-105 transition-transform duration-700"
-                referrerPolicy="no-referrer"
+          {/* Right Column: Visual Brand Editorial Banner */}
+          <div className="lg:col-span-5 h-full flex flex-col">
+            <div className="relative rounded-3xl overflow-hidden shadow-2xl flex-1 flex flex-col justify-end p-8 border border-slate-100 dark:border-brand-teal/15 min-h-[460px]">
+              
+              <img
+                src={WOMAN_IMAGE_PATH}
+                alt="Delighted laundry client"
+                className="absolute inset-0 w-full h-full object-cover object-center filter brightness-90 contrast-105"
               />
-              {/* Custom micro trust badge */}
-              <div className="absolute bottom-6 left-6 right-6 bg-slate-900/80 backdrop-blur-md text-white p-4 rounded-2xl flex items-center gap-3.5 border border-white/10 shadow-lg z-10">
-                <div className="h-10 w-10 rounded-full bg-brand-primary flex items-center justify-center text-white shrink-0 shadow-md">
-                  <Award className="h-5 w-5" />
+
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent" />
+
+              <div className="relative z-10 space-y-4 text-white">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-[10px] font-bold tracking-wider uppercase border border-white/20 font-mono">
+                  <Award className="h-3.5 w-3.5 text-brand-accent" />
+                  VIP Privileges
                 </div>
-                <div>
-                  <p className="text-xs font-bold tracking-wide">Tumblespin Trusted Care</p>
-                  <p className="text-[10px] text-slate-300 font-medium">100% money back refund guarantee at any time.</p>
+
+                <h3 className="text-2xl font-serif font-medium leading-tight">
+                  Seamless garment care, personalized wardrobe tracking, and guaranteed savings.
+                </h3>
+
+                <p className="text-xs text-slate-300 leading-relaxed font-normal">
+                  All memberships are 100% usable on standard cleaning, couture care, sneaker restoration, and express valet delivery.
+                </p>
+
+                <div className="pt-2 flex items-center gap-4 text-xs font-mono text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle className="h-3.5 w-3.5 text-brand-accent" />
+                    Zero Expiry
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle className="h-3.5 w-3.5 text-brand-accent" />
+                    Priority Valet
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle className="h-3.5 w-3.5 text-brand-accent" />
+                    Free Delivery
+                  </span>
                 </div>
               </div>
-            </motion.div>
+
+            </div>
           </div>
 
         </div>
@@ -510,20 +679,20 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowSubscribeModal(false)}
-              className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" 
+              className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" 
             />
             
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white dark:bg-brand-dark rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-brand-accent/20 shadow-2xl overflow-hidden z-10"
+              className="relative w-full max-w-lg bg-white dark:bg-brand-dark rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-brand-accent/20 shadow-2xl overflow-hidden z-10 max-h-[92vh] overflow-y-auto"
               id="membership-subscribe-modal"
             >
               {/* Close Button */}
               <button
                 onClick={() => setShowSubscribeModal(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -536,41 +705,51 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                       Subscribe {selectedPackage} Package
                     </h3>
                     <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mt-1">
-                      Fill out your contact details to create your savings account.
+                      Recharge with <strong>₹{rechargeAmount}</strong> and get <strong>{selectedPackage === 'SMART' ? '10%' : '20%'} OFF</strong> on all orders.
                     </p>
                   </div>
 
                   {/* Quick Package Selector Toggle */}
-                  <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-full border border-slate-100 dark:border-slate-700">
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-100 dark:border-slate-700">
                     <button
                       type="button"
                       onClick={() => setSelectedPackage('SMART')}
-                      className={`py-2 rounded-full text-xs font-bold uppercase transition-all duration-300 ${
+                      className={`py-2.5 rounded-xl text-xs font-bold uppercase transition-all duration-300 flex flex-col items-center gap-0.5 cursor-pointer ${
                         selectedPackage === 'SMART'
-                          ? 'bg-[#1E3A8A] text-white shadow-xs'
+                          ? 'bg-[#1E3A8A] text-white shadow-sm'
                           : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100/50 dark:hover:bg-slate-700/50'
                       }`}
                     >
-                      SMART (₹2k)
+                      <span>SMART (₹2,000)</span>
+                      <span className="text-[10px] font-normal opacity-90">10% OFF all orders</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setSelectedPackage('SILVER')}
-                      className={`py-2 rounded-full text-xs font-bold uppercase transition-all duration-300 ${
+                      className={`py-2.5 rounded-xl text-xs font-bold uppercase transition-all duration-300 flex flex-col items-center gap-0.5 cursor-pointer ${
                         selectedPackage === 'SILVER'
-                          ? 'bg-slate-800 text-white shadow-xs dark:bg-brand-accent dark:text-brand-deep'
+                          ? 'bg-slate-900 text-brand-accent shadow-sm dark:bg-brand-accent dark:text-brand-deep'
                           : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100/50 dark:hover:bg-slate-700/50'
                       }`}
                     >
-                      SILVER (₹5k)
+                      <span>SILVER (₹5,000)</span>
+                      <span className="text-[10px] font-normal opacity-90">20% OFF all orders</span>
                     </button>
                   </div>
+
+                  {/* Inline Form Error Banner */}
+                  {formError && (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-xl text-xs text-rose-700 dark:text-rose-400 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
 
                   {/* Form fields */}
                   <form onSubmit={handleSubscribeSubmit} className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono">
-                        Full Name
+                        Full Name *
                       </label>
                       <div className="relative">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -579,7 +758,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                           required
                           value={fullName}
                           onChange={(e) => setFullName(e.target.value)}
-                          placeholder="E.g. Jayanth Gowda"
+                          placeholder="e.g. Rahul Sharma"
                           className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary"
                         />
                       </div>
@@ -587,7 +766,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono">
-                        Mobile Number
+                        Mobile Number *
                       </label>
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -596,15 +775,16 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                           required
                           value={phone}
                           onChange={(e) => setPhone(e.target.value)}
-                          placeholder="10-digit Phone Number"
+                          placeholder="10-digit Phone Number (e.g. 9876543210)"
                           className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary"
                         />
                       </div>
+                      <p className="text-[10.5px] text-slate-400">Your membership will be linked to this phone number.</p>
                     </div>
 
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono">
-                        Email Address
+                        Email Address *
                       </label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -619,13 +799,32 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                       </div>
                     </div>
 
+                    <div className="p-3 bg-brand-primary/5 dark:bg-brand-accent/5 border border-brand-primary/15 dark:border-brand-accent/20 rounded-xl text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                      <div className="flex justify-between font-bold">
+                        <span>Payable Today:</span>
+                        <span className="text-brand-primary dark:text-brand-accent">₹{rechargeAmount}.00</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        100% credited to your wallet balance. No hidden joining or convenience fees.
+                      </p>
+                    </div>
+
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full mt-6 py-4 bg-brand-primary text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-95 active:scale-98 transition-all flex items-center justify-center gap-2"
+                      className="w-full mt-6 py-4 bg-brand-primary text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-95 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-md"
                     >
-                      {isSubmitting ? 'Processing...' : 'Proceed to Payment'}
-                      <ArrowRight className="h-4 w-4" />
+                      {isSubmitting ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span>Generating Payment Gateway...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Proceed to Payment (₹{rechargeAmount})</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </>
+                      )}
                     </button>
                   </form>
                 </div>
@@ -633,7 +832,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
               {/* Step 2: Payment Gate */}
               {subscribeStep === 2 && (
-                <div className="space-y-6 relative min-h-[450px]">
+                <div className="space-y-6 relative min-h-[460px]">
                   {/* Securing Payment Gateway Loader Overlay */}
                   {paymentStatus === 'processing' && (
                     <motion.div
@@ -647,10 +846,10 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                       </div>
                       <div className="space-y-2">
                         <h4 className="text-lg font-serif font-bold text-slate-800 dark:text-white animate-pulse">
-                          Authorizing Cashfree Gateway Handshake
+                          Verifying Payment Authorization
                         </h4>
                         <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs font-mono">
-                          Checking secure settlement token with Cashfree servers...
+                          Checking settlement ledger with gateway servers...
                         </p>
                       </div>
                     </motion.div>
@@ -681,10 +880,10 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                           Payment Verified & Authorized!
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Your membership plan is now active.
+                          Your {selectedPackage} membership plan is now active.
                         </p>
                         <p className="text-[10px] font-bold font-mono text-slate-400">
-                          Txn Ref: {merchantTransactionId}
+                          Registered Phone: {phone}
                         </p>
                       </motion.div>
                     </motion.div>
@@ -693,17 +892,17 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                   <div>
                     <h3 className="text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
                       <Lock className="h-5 w-5 text-teal-600 dark:text-teal-400" />
-                      Cashfree Secure Membership Checkout
+                      Complete Membership Payment
                     </h3>
                     <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mt-1">
-                      Complete your payment of <strong>₹{rechargeAmount}</strong> to activate your <strong>{selectedPackage}</strong> plan.
+                      Recharge <strong>₹{rechargeAmount}</strong> to activate your <strong>{selectedPackage}</strong> plan.
                     </p>
                   </div>
 
                   {/* Responsive Grid Split */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                     
-                    {/* Left side: Cashfree Dynamic QR Code Container */}
+                    {/* Left side: Dynamic QR Code Container */}
                     <div className="flex flex-col items-center space-y-4">
                       <div className="p-4 bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-2 relative overflow-hidden w-full max-w-[240px] mx-auto">
                         <div className="relative p-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-center">
@@ -719,7 +918,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                                 target.src = alternateUrl;
                               }
                             }}
-                            alt="Dynamic Cashfree QR"
+                            alt="Dynamic UPI QR"
                             className={`h-36 w-36 object-contain rounded-lg transition-all duration-300 ${qrExpired ? 'opacity-20 blur-[1.5px]' : ''}`}
                             referrerPolicy="no-referrer"
                           />
@@ -733,7 +932,7 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                         </div>
 
                         <p className="text-[9.5px] text-teal-700 dark:text-teal-300 font-extrabold tracking-wider uppercase flex items-center gap-1">
-                          <span>🟢</span> Cashfree Dynamic QR / UPI
+                          <span>🟢</span> Dynamic UPI / Gateway QR
                         </p>
 
                         {qrTimeLeft !== null && (
@@ -752,110 +951,102 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
                         )}
                       </div>
 
-                      {/* Cashfree Direct Redirect Link */}
-                      <div className="w-full text-center space-y-1">
-                        <p className="text-[10px] text-slate-400 font-medium">Pay directly on Cashfree Web or App:</p>
-                        {payUrl ? (
+                      {/* Payment Options Links */}
+                      <div className="w-full text-center space-y-2.5">
+                        {/* Cashfree Direct Hosted Checkout Link */}
+                        {payUrl && (
                           <a
                             href={payUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-500 dark:text-white font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-teal-600 text-white hover:bg-teal-700 font-bold text-xs uppercase tracking-wider shadow-md transition-all cursor-pointer"
                           >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            Pay ₹{rechargeAmount} with Cashfree Gateway
-                          </a>
-                        ) : (
-                          <a
-                            href={upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR`}
-                            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 text-white hover:bg-teal-700 font-extrabold text-[10.5px] uppercase tracking-wider shadow-sm transition-all cursor-pointer"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            Open UPI App to Pay
+                            <ExternalLink className="h-4 w-4" />
+                            <span>Pay ₹{rechargeAmount} on Cashfree Gateway</span>
                           </a>
                         )}
+
+                        {/* Mobile Direct UPI Intent */}
+                        <a
+                          href={upiIntent || `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${rechargeAmount}&cu=INR&tn=Membership_${selectedPackage}`}
+                          className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-teal-600/30 bg-teal-50 dark:bg-teal-950/20 text-teal-800 dark:text-teal-200 hover:bg-teal-100 dark:hover:bg-teal-950/40 font-bold text-xs uppercase tracking-wider shadow-xs transition-all cursor-pointer"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          <span>Open UPI App to Pay ₹{rechargeAmount}</span>
+                        </a>
                       </div>
                     </div>
 
-                    {/* Right side: Verification Status & Simulation */}
+                    {/* Right side: Summary & Real Gateway Verification */}
                     <div className="space-y-4">
                       {/* Summary card */}
                       <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-700/50 space-y-2">
                         <div className="flex justify-between text-xs font-semibold">
-                          <span className="text-slate-400">Subscriber Name</span>
+                          <span className="text-slate-400">Subscriber</span>
                           <span className="text-slate-800 dark:text-white font-bold">{fullName}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-400">Registered Mobile</span>
+                          <span className="text-slate-800 dark:text-white font-mono font-bold">{phone}</span>
                         </div>
                         <div className="flex justify-between text-xs font-semibold">
                           <span className="text-slate-400">Selected Plan</span>
                           <span className="text-teal-700 dark:text-teal-300 font-extrabold font-mono">{selectedPackage}</span>
                         </div>
                         <div className="flex justify-between text-xs font-semibold">
-                          <span className="text-slate-400">Total Recharge</span>
-                          <span className="text-slate-800 dark:text-white font-extrabold font-mono">₹{rechargeAmount}</span>
-                        </div>
-                        <div className="flex justify-between text-xs font-semibold pt-1 border-t border-slate-200 dark:border-slate-700">
-                          <span className="text-slate-400">Merchant Txn ID</span>
-                          <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">{merchantTransactionId}</span>
+                          <span className="text-slate-400">Amount to Pay</span>
+                          <span className="text-slate-800 dark:text-white font-extrabold font-mono text-sm">₹{rechargeAmount}.00</span>
                         </div>
                       </div>
 
-                      {/* Real-time Status Card */}
-                      <div className="p-4 rounded-2xl bg-slate-900 text-white dark:bg-slate-950 border border-slate-800 space-y-2">
+                      {/* Cashfree Real Verification Status Box */}
+                      <div className="p-3.5 bg-slate-900 text-white rounded-2xl space-y-2.5 border border-teal-500/30">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                            Backend Verification Active
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400">Polling every 3s</span>
+                          <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-teal-400 font-mono">
+                            <span className="h-2 w-2 rounded-full bg-teal-400 animate-ping" />
+                            <span>Cashfree Gateway Active</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">Auto-polling</span>
                         </div>
-                        <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                          We are querying Cashfree servers for real verified settlement. Once confirmed by Cashfree, your subscription will activate instantly!
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          Once payment is completed on Cashfree or your UPI app, our system will automatically verify and activate your subscription.
                         </p>
                       </div>
 
-                      {/* Developer Simulation Button for Sandbox Testing */}
-                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                      {statusFeedback && (
+                        <div className={`p-3 rounded-xl text-xs font-medium ${
+                          statusFeedback.type === 'success' 
+                            ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-500/20' 
+                            : 'bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-300 border border-rose-500/20'
+                        }`}>
+                          {statusFeedback.message}
+                        </div>
+                      )}
+
+                      {/* Manual Trigger to Verify Status with Cashfree Gateway */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
                         <button
                           type="button"
-                          onClick={async () => {
-                            setIsSimulatingCashfree(true);
-                            try {
-                              const res = await robustFetch('/api/cashfree/simulate-payment', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  merchantTransactionId,
-                                  amount: rechargeAmount
-                                })
-                              });
-                              if (res.ok) {
-                                console.log('[Cashfree Simulation] Backend payment verified successfully for membership.');
-                              }
-                            } catch (simErr) {
-                              console.error('Simulation error:', simErr);
-                            } finally {
-                              setIsSimulatingCashfree(false);
-                            }
-                          }}
-                          disabled={isSimulatingCashfree}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          onClick={handleCheckPaymentStatus}
+                          disabled={isCheckingPayment}
+                          className="w-full py-3 bg-teal-700 hover:bg-teal-800 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                         >
-                          {isSimulatingCashfree ? (
-                            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white border-t-transparent" />
+                          {isCheckingPayment ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
                           ) : (
-                            <ShieldCheck className="h-3.5 w-3.5" />
+                            <ShieldCheck className="h-4 w-4" />
                           )}
-                          <span>⚡ Simulate Cashfree Payment Success (Sandbox Test)</span>
+                          <span>I've Completed Payment – Check Status Now</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSubscribeStep(1)}
+                          className="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 cursor-pointer"
+                        >
+                          Back / Change Details
                         </button>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setSubscribeStep(1)}
-                        className="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 cursor-pointer"
-                      >
-                        Back / Change Details
-                      </button>
                     </div>
 
                   </div>
@@ -864,52 +1055,81 @@ export default function MembershipPackages({ onOpenBooking }: MembershipPackages
 
               {/* Step 3: Success Celebration */}
               {subscribeStep === 3 && (
-                <div className="text-center py-8 space-y-6">
-                  <div className="mx-auto h-16 w-16 bg-emerald-100 dark:bg-emerald-950/40 rounded-full flex items-center justify-center text-emerald-600 dark:text-brand-accent shadow-inner">
-                    <Check className="h-8 w-8" />
+                <div className="text-center py-6 space-y-6">
+                  <div className="mx-auto h-16 w-16 bg-emerald-100 dark:bg-emerald-950/40 rounded-full flex items-center justify-center text-emerald-600 dark:text-brand-accent shadow-inner animate-bounce">
+                    <Check className="h-8 w-8 stroke-[3]" />
                   </div>
 
                   <div className="space-y-2">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 text-xs font-bold uppercase tracking-wider">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Subscription Active
+                    </div>
                     <h3 className="text-2xl font-serif font-bold text-slate-900 dark:text-white">
                       Welcome to the Club, {fullName}!
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold max-w-sm mx-auto leading-relaxed">
-                      Your <strong className="text-brand-primary dark:text-brand-accent">{selectedPackage}</strong> membership is now active under <strong className="text-slate-800 dark:text-white">{phone}</strong>.
+                      Your <strong className="text-brand-primary dark:text-brand-accent">{selectedPackage}</strong> membership is now confirmed under mobile number <strong className="text-slate-800 dark:text-white">{phone}</strong>.
                     </p>
                   </div>
 
-                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl inline-block text-left w-full max-w-sm border border-slate-100 dark:border-slate-700">
-                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider font-mono mb-2">
-                      Active Subscription summary
-                    </p>
-                    <div className="space-y-1 text-xs">
-                      <div className="flex justify-between font-semibold">
-                        <span className="text-slate-400">Available Balance:</span>
-                        <span className="text-slate-800 dark:text-white font-bold font-mono">₹{rechargeAmount}.00</span>
+                  {/* Membership Card */}
+                  <div className="p-5 bg-gradient-to-br from-slate-900 via-brand-deep to-slate-950 text-white rounded-3xl inline-block text-left w-full max-w-md border border-slate-800 shadow-xl relative overflow-hidden">
+                    <div className="absolute -right-10 -bottom-10 w-32 h-32 bg-brand-accent/10 rounded-full blur-xl pointer-events-none" />
+                    
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-brand-accent" />
+                        <span className="text-xs font-bold uppercase tracking-widest text-brand-accent font-mono">
+                          Tumble Spin Club
+                        </span>
                       </div>
-                      <div className="flex justify-between font-semibold">
-                        <span className="text-slate-400">Active Discount:</span>
-                        <span className="text-brand-primary dark:text-brand-accent font-extrabold">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase bg-white/10 text-white border border-white/20">
+                        {selectedPackage} TIER
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex justify-between items-center py-1 border-b border-white/10">
+                        <span className="text-slate-400 font-medium">Prepaid Balance:</span>
+                        <span className="text-white font-extrabold font-mono text-base">₹{rechargeAmount}.00</span>
+                      </div>
+                      <div className="flex justify-between items-center py-1 border-b border-white/10">
+                        <span className="text-slate-400 font-medium">Guaranteed Discount:</span>
+                        <span className="text-brand-accent font-extrabold">
                           {selectedPackage === 'SMART' ? '10% OFF' : '20% OFF'} on all orders
                         </span>
                       </div>
-                      <div className="flex justify-between font-semibold">
-                        <span className="text-slate-400">Membership ID:</span>
-                        <span className="text-slate-800 dark:text-white font-mono">{phone.replace(/\D/g, '')}</span>
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-slate-400 font-medium">Registered Phone:</span>
+                        <span className="text-white font-mono font-bold">{phone}</span>
                       </div>
                     </div>
                   </div>
 
-                  <p className="text-[10px] text-slate-400 font-medium">
-                    ✨ Simply use this phone number when placing any booking, and your membership discount will apply automatically!
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium max-w-sm mx-auto">
+                    ✨ Simply enter <strong>{phone}</strong> whenever you book a pickup, and your discount will be applied automatically!
                   </p>
 
-                  <button
-                    onClick={() => setShowSubscribeModal(false)}
-                    className="w-full py-4 bg-brand-primary text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-95 active:scale-98 transition-all"
-                  >
-                    Done
-                  </button>
+                  <div className="space-y-2 pt-2">
+                    <button
+                      onClick={() => {
+                        setShowSubscribeModal(false);
+                        onOpenBooking();
+                      }}
+                      className="w-full py-4 bg-brand-primary text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:opacity-95 active:scale-98 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>Book Pickup Now With Membership</span>
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+
+                    <button
+                      onClick={() => setShowSubscribeModal(false)}
+                      className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
+                    >
+                      Done
+                    </button>
+                  </div>
                 </div>
               )}
 

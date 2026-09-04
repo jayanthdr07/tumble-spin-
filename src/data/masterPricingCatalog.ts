@@ -1,8 +1,8 @@
 export interface MasterPricingItem {
   id: string;
   name: string;
-  category: 'laundry' | 'kids' | 'men' | 'women' | 'woolens' | 'household' | 'shoes' | 'bags' | 'services';
-  categoryLabel: string;
+  category: 'laundry' | 'kids' | 'men' | 'women' | 'woolens' | 'household' | 'shoes' | 'bags' | 'services' | string;
+  categoryLabel?: string;
   unit: string;
   serviceType: string;
   defaultPrice: number;
@@ -11,6 +11,9 @@ export interface MasterPricingItem {
   estimatorDryCleanDefault?: number | null;
   estimatorSteamIronDefault?: number | null;
   description?: string;
+  isCustom?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface MasterPricingCategory {

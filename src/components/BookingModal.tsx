@@ -12,7 +12,8 @@ import { getItemIcon } from '../utils/itemIcons';
 import InteractiveMiniMap from './InteractiveMiniMap';
 import { useBusinessInfo } from '../utils/useBusinessInfo';
 import { db, isFirestoreSuspended } from '../lib/firebase';
-import { doc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { useMasterCatalog } from '../utils/catalogStore';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -234,18 +235,36 @@ export default function BookingModal({
     };
   }, []);
 
-  const effectiveSubServices = SUB_SERVICES.map(service => {
-    const override = customPrices?.booking?.[service.id];
-    if (override !== undefined && override !== null && override !== '') {
-      return { ...service, price: Number(override) };
-    }
-    // Also check estimator dryClean override if set
-    const estimatorOverride = customPrices?.estimator?.[service.id]?.dryClean;
-    if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '') {
-      return { ...service, price: Number(estimatorOverride) };
-    }
-    return service;
-  });
+  const { items: liveCatalogItems } = useMasterCatalog();
+
+  const effectiveSubServices = React.useMemo(() => {
+    const baseMerged = SUB_SERVICES.map(service => {
+      const override = customPrices?.booking?.[service.id];
+      if (override !== undefined && override !== null && override !== '') {
+        return { ...service, price: Number(override) };
+      }
+      // Also check estimator dryClean override if set
+      const estimatorOverride = customPrices?.estimator?.[service.id]?.dryClean;
+      if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '') {
+        return { ...service, price: Number(estimatorOverride) };
+      }
+      return service;
+    });
+
+    // Merge custom items from master catalog
+    const baseSubIds = new Set(baseMerged.map(s => s.id));
+    const customSubServices: SubService[] = liveCatalogItems
+      .filter(item => !baseSubIds.has(item.id) && item.isCustom)
+      .map(item => ({
+        id: item.id,
+        name: item.name + (item.unit && item.unit !== 'per pc' ? ` (${item.unit})` : ''),
+        category: item.category === 'woolen' ? 'woolens' : item.category,
+        price: item.defaultPrice || 99,
+        serviceType: item.serviceType || 'Custom Care'
+      }));
+
+    return [...baseMerged, ...customSubServices];
+  }, [customPrices, liveCatalogItems]);
 
   const [step, setStep] = useState(1);
   const [isWhatsAppMode, setIsWhatsAppMode] = useState(false);
@@ -253,7 +272,7 @@ export default function BookingModal({
   const [memberships, setMemberships] = useState<any[]>([]);
 
   useEffect(() => {
-    const loadMemberships = () => {
+    const loadMembershipsFromLocal = () => {
       const saved = localStorage.getItem('tumblespin_memberships');
       if (saved) {
         try {
@@ -263,16 +282,45 @@ export default function BookingModal({
         }
       }
     };
-    loadMemberships();
-    window.addEventListener('storage', loadMemberships);
-    return () => window.removeEventListener('storage', loadMemberships);
+    loadMembershipsFromLocal();
+    window.addEventListener('storage', loadMembershipsFromLocal);
+
+    // Live sync from Firestore memberships collection
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = onSnapshot(collection(db, 'memberships'), (snapshot) => {
+        const liveSubs: any[] = [];
+        snapshot.forEach((docSnap) => {
+          liveSubs.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        if (liveSubs.length > 0) {
+          setMemberships(liveSubs);
+          localStorage.setItem('tumblespin_memberships', JSON.stringify(liveSubs));
+        }
+      }, (err) => {
+        console.warn('Firestore memberships listener notice:', err);
+      });
+    } catch (fsErr) {
+      console.warn('Firestore memberships sync offline:', fsErr);
+    }
+
+    return () => {
+      window.removeEventListener('storage', loadMembershipsFromLocal);
+      unsubscribe();
+    };
   }, []);
 
   const getActiveMembership = () => {
     if (!bookingDetails.phone) return null;
-    const cleanPhone = bookingDetails.phone.replace(/\D/g, '');
+    const rawDigits = bookingDetails.phone.replace(/\D/g, '');
+    const cleanPhone = rawDigits.length >= 10 ? rawDigits.slice(-10) : rawDigits;
     if (!cleanPhone) return null;
-    return memberships.find(m => m.phone.replace(/\D/g, '') === cleanPhone && m.status === 'active') || null;
+
+    return memberships.find(m => {
+      const mDigits = (m.phone || '').replace(/\D/g, '');
+      const mClean = mDigits.length >= 10 ? mDigits.slice(-10) : mDigits;
+      return mClean === cleanPhone && m.status === 'active';
+    }) || null;
   };
 
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -669,10 +717,12 @@ export default function BookingModal({
     setBookingDetails(prev => ({ ...prev, garmentCareOption: option }));
   };
 
-  const getNextDays = (count = 7) => {
+  const getNextDays = (count = 7, includeToday = true) => {
     const days = [];
     const today = new Date();
-    for (let i = 1; i <= count; i++) {
+    const startIndex = includeToday ? 0 : 1;
+    const max = includeToday ? count - 1 : count;
+    for (let i = startIndex; i <= max; i++) {
       const futureDate = new Date(today);
       futureDate.setDate(today.getDate() + i);
       days.push(futureDate);
@@ -680,7 +730,8 @@ export default function BookingModal({
     return days;
   };
 
-  const nextDays = getNextDays();
+  const nextDays = getNextDays(7, true);
+  const deliveryDays = getNextDays(7, true);
 
   const validateStep2 = () => {
     const errors: Record<string, string> = {};
@@ -690,8 +741,10 @@ export default function BookingModal({
     if (bookingDetails.pickupDate && bookingDetails.deliveryDate) {
       const pickup = new Date(bookingDetails.pickupDate);
       const delivery = new Date(bookingDetails.deliveryDate);
-      if (delivery <= pickup) {
-        errors.deliveryDate = 'Delivery must be after pickup date';
+      pickup.setHours(0, 0, 0, 0);
+      delivery.setHours(0, 0, 0, 0);
+      if (delivery < pickup) {
+        errors.deliveryDate = 'Delivery date cannot be before pickup date';
       }
     }
     setFormErrors(errors);
@@ -2215,40 +2268,34 @@ export default function BookingModal({
                         </p>
                       </div>
 
-                      {/* Developer Sandbox Simulation Button */}
+                      {/* Real Gateway Status Check Trigger */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
                         <button
                           type="button"
                           onClick={async () => {
+                            if (!merchantTransactionId) return;
                             setIsSimulatingCashfree(true);
                             try {
-                              const res = await robustFetch('/api/cashfree/simulate-payment', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  orderId: generatedOrderId,
-                                  merchantTransactionId,
-                                  amount: getGrandTotal()
-                                })
-                              });
-                              if (res.ok) {
-                                console.log('[Cashfree Simulation] Backend payment verified successfully.');
+                              const res = await robustFetch(`/api/cashfree/status/${encodeURIComponent(merchantTransactionId)}`);
+                              const data = await res.json();
+                              if (data.success && (data.paymentStatus === 'paid' || data.verified === true)) {
+                                console.log('[Cashfree] Verified payment received from gateway.');
                               }
                             } catch (simErr) {
-                              console.error('Simulation error:', simErr);
+                              console.error('Status check error:', simErr);
                             } finally {
                               setIsSimulatingCashfree(false);
                             }
                           }}
                           disabled={isSimulatingCashfree}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
                           {isSimulatingCashfree ? (
                             <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white border-t-transparent" />
                           ) : (
                             <ShieldCheck className="h-3.5 w-3.5" />
                           )}
-                          <span>⚡ Simulate Cashfree Payment Success (Sandbox Test)</span>
+                          <span>I've Completed Payment – Check Status Now</span>
                         </button>
                       </div>
 
@@ -2461,23 +2508,31 @@ export default function BookingModal({
                             3. Fresh Delivery Date
                           </label>
                           <div className="grid grid-cols-3 gap-2">
-                            {nextDays.slice(1, 7).map((day, idx) => {
+                            {deliveryDays.slice(0, 6).map((day, idx) => {
                               const isoDate = day.toISOString().split('T')[0];
                               const isSelected = bookingDetails.deliveryDate === isoDate;
                               const weekday = day.toLocaleDateString('en-US', { weekday: 'short' });
                               const month = day.toLocaleDateString('en-US', { month: 'short' });
                               const dateNum = day.getDate();
+                              const isToday = day.toDateString() === new Date().toDateString();
                               return (
                                 <button
                                   type="button"
                                   key={`delivery-${isoDate}-${idx}`}
                                   onClick={() => setBookingDetails(prev => ({ ...prev, deliveryDate: isoDate }))}
-                                  className={`rounded-2xl border p-2 text-center transition-all cursor-pointer flex flex-col justify-between items-center ${
+                                  className={`rounded-2xl border p-2 text-center transition-all cursor-pointer flex flex-col justify-between items-center relative ${
                                     isSelected
                                       ? 'border-brand-primary bg-linear-to-b from-brand-primary to-brand-secondary text-white dark:border-brand-accent dark:from-brand-accent dark:to-brand-accent/80 dark:text-brand-deep shadow-md scale-[1.03]'
                                       : 'border-slate-200/80 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/60 dark:hover:border-slate-700'
                                   }`}
                                 >
+                                  {isToday && (
+                                    <span className={`absolute -top-1.5 px-1.5 py-0.5 rounded-full text-[7px] font-black uppercase tracking-wider ${
+                                      isSelected ? 'bg-white text-brand-primary' : 'bg-brand-primary text-white'
+                                    }`}>
+                                      Today
+                                    </span>
+                                  )}
                                   <span className={`text-[8px] uppercase tracking-wider font-extrabold ${isSelected ? 'text-white/80 dark:text-brand-deep/80' : 'text-slate-400'}`}>
                                     {month}
                                   </span>

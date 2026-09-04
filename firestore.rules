@@ -60,6 +60,11 @@ service cloud.firestore {
     match /test/{testId} {
       allow read, write: if true;
     }
+
+    // --- CATALOG ITEMS COLLECTION rules ---
+    match /catalog_items/{itemId} {
+      allow read, write: if true;
+    }
   }
 }
 
