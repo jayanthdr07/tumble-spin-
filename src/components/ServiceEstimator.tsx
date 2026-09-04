@@ -6,6 +6,7 @@ import {
   Layers, Home, Briefcase, Scissors
 } from 'lucide-react';
 import { getItemIcon } from '../utils/itemIcons';
+import { getDeletedCatalogItemIds } from '../utils/catalogStore';
 
 export interface EstimatorItem {
   id: string;
@@ -147,13 +148,20 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     };
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+    window.addEventListener('tumblespin_catalog_deleted_updated', handleStorageChange);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
+      window.removeEventListener('tumblespin_catalog_deleted_updated', handleStorageChange);
     };
   }, []);
 
-  const filteredItems = ESTIMATOR_ITEMS.filter(item => item.category === activeCategory);
+  const deletedIds = getDeletedCatalogItemIds();
+  const filteredItems = ESTIMATOR_ITEMS.filter(item => {
+    if (item.category !== activeCategory) return false;
+    if (deletedIds.includes(item.id)) return false;
+    return true;
+  });
 
   const handleServiceTypeChange = (itemId: string, type: 'Dry Clean' | 'Steam Iron') => {
     setSelectedServiceType(prev => ({

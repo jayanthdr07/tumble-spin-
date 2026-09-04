@@ -1391,10 +1391,33 @@ export default function AdminPanel({
     window.dispatchEvent(new Event('storage'));
   };
 
+  const handlePermanentlyDeleteArchivedOrder = (orderId: string) => {
+    const updated = deletedOrders.filter(o => o.orderId !== orderId);
+    setDeletedOrders(updated);
+    localStorage.setItem('tumblespin_deleted_orders', JSON.stringify(updated));
+    window.dispatchEvent(new Event('storage'));
+    setNotifToast({
+      visible: true,
+      message: `🗑️ Order #${orderId} permanently purged from system records.`,
+      status: 'Ready'
+    });
+    setTimeout(() => {
+      setNotifToast(prev => ({ ...prev, visible: false }));
+    }, 3500);
+  };
+
   const handlePurgeDeletedOrders = () => {
     setDeletedOrders([]);
     localStorage.setItem('tumblespin_deleted_orders', JSON.stringify([]));
     window.dispatchEvent(new Event('storage'));
+    setNotifToast({
+      visible: true,
+      message: `🗑️ All archived order logs have been permanently purged.`,
+      status: 'Ready'
+    });
+    setTimeout(() => {
+      setNotifToast(prev => ({ ...prev, visible: false }));
+    }, 3500);
   };
 
   // Derived state: Filtered Orders based on search query, status filter, and date filter
@@ -1466,8 +1489,8 @@ export default function AdminPanel({
       processingCount,
       readyCount,
       deliveredCount,
-      totalRevenue,
-      projectedRevenue,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      projectedRevenue: Number(projectedRevenue.toFixed(2)),
       unreadCount
     };
   })();
@@ -1914,7 +1937,7 @@ export default function AdminPanel({
                                   Financial Insights
                                 </span>
                                 <h3 className="text-lg font-black text-slate-800 dark:text-white mt-0.5 leading-none font-mono">
-                                  ₹{stats.totalRevenue}
+                                  ₹{Number(stats.totalRevenue).toFixed(2)}
                                 </h3>
                               </div>
                               <div className="p-1.5 rounded-lg bg-emerald-500/10 dark:bg-brand-accent/10">
@@ -1923,11 +1946,11 @@ export default function AdminPanel({
                             </div>
                             <div className="mt-2.5 flex justify-between items-center text-[10px] border-t border-slate-200/40 dark:border-brand-teal/10 pt-2 font-semibold">
                               <span className="text-slate-500 dark:text-slate-400">
-                                Delivered: <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">₹{stats.totalRevenue}</strong>
+                                Delivered: <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">₹{Number(stats.totalRevenue).toFixed(2)}</strong>
                               </span>
                               <span className="text-slate-400">|</span>
                               <span className="text-slate-500 dark:text-slate-400">
-                                Projected: <strong className="text-brand-primary dark:text-slate-200 font-mono font-black">₹{stats.projectedRevenue}</strong>
+                                Projected: <strong className="text-brand-primary dark:text-slate-200 font-mono font-black">₹{Number(stats.projectedRevenue).toFixed(2)}</strong>
                               </span>
                             </div>
                           </div>
@@ -2255,7 +2278,7 @@ export default function AdminPanel({
                                     </h4>
                                   </div>
                                   <span className="text-[9px] font-bold bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/15 dark:text-brand-accent px-2 py-0.5 rounded-sm">
-                                    ₹{o.totalPrice}
+                                    ₹{Number(o.totalPrice || 0).toFixed(2)}
                                   </span>
                                 </div>
 
@@ -2437,7 +2460,7 @@ export default function AdminPanel({
                               <div className="flex justify-between items-baseline pt-3 font-bold text-sm">
                                 <span className="text-slate-800 dark:text-white">Calculated Net Total:</span>
                                 <span className="text-lg font-mono text-brand-primary dark:text-brand-accent">
-                                  ₹{selectedOrder.totalPrice}
+                                  ₹{Number(selectedOrder.totalPrice || 0).toFixed(2)}
                                 </span>
                               </div>
                             </div>
@@ -3885,7 +3908,7 @@ export default function AdminPanel({
                                     </div>
                                     <div className="text-right">
                                       <span className="text-xs font-black text-slate-800 dark:text-white font-mono block">
-                                        ₹{c.totalSpend}
+                                        ₹{Number(c.totalSpend || 0).toFixed(2)}
                                       </span>
                                       <span className="text-[9px] font-bold text-slate-400 block">
                                         {c.offlineOrders.length + c.onlineOrders.length} orders
@@ -3946,11 +3969,11 @@ export default function AdminPanel({
                                 </button>
                                 <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[90px]">
                                   <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">Total Spent</span>
-                                  <strong className="text-md font-black font-mono text-brand-primary dark:text-brand-accent">₹{selectedCustomer.totalSpend}</strong>
+                                  <strong className="text-md font-black font-mono text-brand-primary dark:text-brand-accent">₹{Number(selectedCustomer.totalSpend || 0).toFixed(2)}</strong>
                                 </div>
                                 <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[90px]">
                                   <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">Offline Spent</span>
-                                  <strong className="text-md font-black font-mono text-emerald-600 dark:text-emerald-400">₹{selectedCustomer.totalOfflineSpend}</strong>
+                                  <strong className="text-md font-black font-mono text-emerald-600 dark:text-emerald-400">₹{Number(selectedCustomer.totalOfflineSpend || 0).toFixed(2)}</strong>
                                 </div>
                               </div>
                             </div>
@@ -4179,7 +4202,7 @@ export default function AdminPanel({
                             </div>
                             <div className="mt-3">
                               <h3 className="text-2xl font-black text-slate-800 dark:text-white leading-none font-mono">
-                                ₹{total30DayRevenue}
+                                ₹{total30DayRevenue.toFixed(2)}
                               </h3>
                               <span className="text-[10px] text-slate-400 mt-1 block">Combined Offline + Online sales</span>
                             </div>
@@ -4196,7 +4219,7 @@ export default function AdminPanel({
                             </div>
                             <div className="mt-3">
                               <h3 className="text-2xl font-black text-brand-primary dark:text-slate-200 leading-none font-mono">
-                                ₹{totalOnlineRevenue}
+                                ₹{totalOnlineRevenue.toFixed(2)}
                               </h3>
                               <span className="text-[10px] text-slate-400 mt-1 block">{onlineOrdersCount} deliveries scheduled</span>
                             </div>
@@ -4213,7 +4236,7 @@ export default function AdminPanel({
                             </div>
                             <div className="mt-3">
                               <h3 className="text-2xl font-black text-emerald-600 dark:text-emerald-400 leading-none font-mono">
-                                ₹{totalOfflineRevenue}
+                                ₹{totalOfflineRevenue.toFixed(2)}
                               </h3>
                               <span className="text-[10px] text-slate-400 mt-1 block">{offlineOrdersCount} walk-in counter sales completed</span>
                             </div>
@@ -4422,20 +4445,30 @@ export default function AdminPanel({
                                 </div>
                                 <div>
                                   <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Financial Status</span>
-                                  <span className="font-mono font-black text-slate-700 dark:text-white block">₹{order.totalPrice}</span>
+                                  <span className="font-mono font-black text-slate-700 dark:text-white block">₹{Number(order.totalPrice || 0).toFixed(2)}</span>
                                   <span className="text-[10px] font-bold block text-slate-500 dark:text-slate-400 uppercase mt-0.5">{order.status}</span>
                                 </div>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0 self-end md:self-auto border-t md:border-t-0 border-slate-100 dark:border-brand-teal/5 pt-3.5 md:pt-0">
+                            <div className="flex items-center gap-2.5 shrink-0 self-end md:self-auto border-t md:border-t-0 border-slate-100 dark:border-brand-teal/5 pt-3.5 md:pt-0">
                               <button
                                 type="button"
                                 onClick={() => handleRestoreOrder(order)}
-                                className="px-5 py-2.5 rounded-full bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-bold uppercase tracking-wider shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center gap-2 cursor-pointer"
+                                className="px-4 py-2 rounded-xl bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-bold uppercase tracking-wider shadow-xs hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center gap-1.5 cursor-pointer"
+                                title="Restore back to active orders board"
                               >
                                 <RefreshCw className="h-3.5 w-3.5" />
-                                Restore Order Booking
+                                Restore
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePermanentlyDeleteArchivedOrder(order.orderId)}
+                                className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-900/40 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                                title="Permanently delete from archive logs"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Purge
                               </button>
                             </div>
                           </div>

@@ -77,6 +77,7 @@ export default function MasterPricingManager({
   });
 
   const [editingItem, setEditingItem] = useState<MasterPricingItem | null>(null);
+  const [deletingItem, setDeletingItem] = useState<MasterPricingItem | null>(null);
 
   // Feedback states
   const [isSaving, setIsSaving] = useState(false);
@@ -324,17 +325,27 @@ export default function MasterPricingManager({
     }
   };
 
-  // Handle Deleting an Item
-  const handleDeleteItem = async (item: MasterPricingItem) => {
-    if (window.confirm(`Are you sure you want to remove "${item.name}" from the pricing catalog?`)) {
-      try {
-        await deleteItem(item.id);
-        setSuccessMsg(`Item "${item.name}" was removed from the catalog.`);
-        setTimeout(() => setSuccessMsg(''), 4000);
-      } catch (err) {
-        console.error('Error deleting item:', err);
-        setErrorMsg('Failed to delete item from catalog.');
+  // Handle Deleting an Item - Open in-app confirmation modal
+  const handleDeleteItem = (item: MasterPricingItem) => {
+    setDeletingItem(item);
+  };
+
+  // Perform Permanent Deletion
+  const confirmDeleteItem = async (item: MasterPricingItem) => {
+    setIsSubmittingItem(true);
+    try {
+      await deleteItem(item.id);
+      if (editingItem?.id === item.id) {
+        setEditingItem(null);
       }
+      setSuccessMsg(`✨ "${item.name}" has been permanently deleted from the master catalog.`);
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      setErrorMsg('Failed to delete item from catalog.');
+    } finally {
+      setIsSubmittingItem(false);
+      setDeletingItem(null);
     }
   };
 
@@ -719,18 +730,20 @@ export default function MasterPricingManager({
                             <button
                               type="button"
                               onClick={() => setEditingItem({ ...item })}
-                              className="p-1 rounded-lg text-slate-400 hover:text-brand-primary dark:hover:text-brand-accent hover:bg-slate-200/50 dark:hover:bg-brand-deep/50 transition-colors"
-                              title="Edit item details (Name, Category, Default Price, Unit)"
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-brand-primary dark:text-slate-400 dark:hover:text-brand-accent hover:bg-slate-200/50 dark:hover:bg-brand-deep/50 transition-colors cursor-pointer"
+                              title={`Edit details of "${item.name}"`}
+                              aria-label={`Edit ${item.name}`}
                             >
-                              <Edit2 className="h-3 w-3" />
+                              <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteItem(item)}
-                              className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
-                              title="Delete item from catalog"
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-white hover:bg-rose-600 dark:hover:bg-rose-600 bg-rose-500/10 border border-rose-500/25 transition-all cursor-pointer shadow-2xs"
+                              title={`Permanently delete "${item.name}"`}
+                              aria-label={`Permanently delete ${item.name}`}
                             >
-                              <Trash2 className="h-3 w-3" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1140,24 +1153,106 @@ export default function MasterPricingManager({
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-brand-teal/10">
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-brand-teal/10">
                   <button
                     type="button"
-                    onClick={() => setEditingItem(null)}
-                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white"
+                    onClick={() => {
+                      const itemToDelete = editingItem;
+                      setEditingItem(null);
+                      setDeletingItem(itemToDelete);
+                    }}
+                    className="px-3 py-2 text-xs font-bold text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    Cancel
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete Permanently</span>
                   </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmittingItem}
-                    className="px-5 py-2 rounded-xl bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-xs hover:opacity-95"
-                  >
-                    {isSubmittingItem ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                    <span>Update Item</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingItem(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingItem}
+                      className="px-5 py-2 rounded-xl bg-brand-primary text-white dark:bg-brand-accent dark:text-brand-deep text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-xs hover:opacity-95 cursor-pointer"
+                    >
+                      {isSubmittingItem ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      <span>Update Item</span>
+                    </button>
+                  </div>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 🗑️ PERMANENT DELETION CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {deletingItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-md bg-white dark:bg-brand-dark rounded-2xl border border-rose-200 dark:border-rose-900/30 shadow-2xl overflow-hidden p-6 space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 shrink-0">
+                  <Trash2 className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-slate-800 dark:text-white font-mono">
+                    Permanently Delete Item?
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    This action will permanently delete this item from the catalog across all devices.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/60 dark:border-rose-900/30 space-y-1">
+                <div className="text-xs font-black text-slate-800 dark:text-white">
+                  {deletingItem.name}
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                  <span>Category: <strong>{deletingItem.categoryLabel || deletingItem.category}</strong></span>
+                  <span>•</span>
+                  <span>Default: <strong>₹{deletingItem.defaultPrice}</strong></span>
+                  <span>•</span>
+                  <span>{deletingItem.unit}</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Are you sure you want to permanently delete <strong>"{deletingItem.name}"</strong>? It will be removed immediately from customer booking selections, price estimators, and master pricing across all devices.
+              </p>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-brand-teal/10">
+                <button
+                  type="button"
+                  onClick={() => setDeletingItem(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmDeleteItem(deletingItem)}
+                  disabled={isSubmittingItem}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-md transition-all cursor-pointer"
+                >
+                  {isSubmittingItem ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>Delete Permanently</span>
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
