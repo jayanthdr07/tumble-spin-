@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, Sun, Moon, Sparkles, CalendarRange, PhoneCall, Compass, ShieldCheck, Lock, Cloud, CloudOff, Database } from 'lucide-react';
+import { Menu, X, Sun, Moon, Sparkles, PhoneCall, Compass, ShieldCheck, Lock, Cloud, CloudOff, Database } from 'lucide-react';
 import logoImg from '../assets/images/tumblespin_header_logo.png';
 import { useBusinessInfo } from '../utils/useBusinessInfo';
 import { unsuspendFirestoreSync } from '../lib/firebase';
@@ -207,18 +207,6 @@ export default function Header({
                   </span>
                 )}
               </button>
-
-              {/* Main Premium CTA */}
-              <button
-                onClick={onOpenBooking}
-                className="relative overflow-hidden rounded-full bg-slate-900 px-5 lg:px-6 py-2.5 text-xs font-extrabold tracking-wider text-white uppercase shadow-sm transition-all duration-300 hover:bg-slate-800 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 dark:bg-brand-accent dark:text-brand-deep dark:hover:bg-white cursor-pointer whitespace-nowrap"
-                id="header-schedule-pickup-btn"
-              >
-                <span className="relative z-10 flex items-center gap-2">
-                  <CalendarRange className="h-4 w-4 shrink-0" />
-                  SCHEDULE PICKUP
-                </span>
-              </button>
             </div>
 
             {/* Mobile Controls (Visible only on Mobile, aligned to the right side of header) */}
@@ -318,18 +306,6 @@ export default function Header({
 
             {/* Bottom Actions Footer */}
             <div className="border-t border-white/10 pt-6 pb-4 space-y-4">
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenBooking();
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#9D4EDD] to-[#5EEAD4] hover:from-[#5EEAD4] hover:to-[#9D4EDD] py-4 text-center text-sm font-bold tracking-wider text-[#0B0914] uppercase shadow-lg shadow-[#5EEAD4]/10 transition-all duration-300 active:scale-95"
-                id="mobile-schedule-pickup-btn"
-              >
-                <CalendarRange className="h-4.5 w-4.5" />
-                SCHEDULE PICKUP
-              </button>
-              
               <a 
                 href={`tel:+91${businessInfo.phone}`} 
                 className="flex items-center justify-center gap-2.5 text-center text-xs font-semibold text-[#5EEAD4] hover:text-white transition-colors py-2"

@@ -6,7 +6,7 @@ import {
   ChevronDown, MessageSquare, ShoppingBag, Plus, Trash2, ListOrdered, Bell,
   Search, Settings, Store, Receipt, Download, ShoppingCart, Info, Minus,
   Printer, Package, Users, TrendingUp, Sun, Moon,
-  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy
+  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy, FileSpreadsheet
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { useBusinessInfo, setBusinessInfo, getBusinessInfo, BusinessInfo } from '../utils/useBusinessInfo';
 import { downloadInvoice } from '../utils/invoiceGenerator';
+import { exportCustomersToExcel, printCustomerDirectory, CustomerSummary } from '../utils/customerExcelExporter';
 import { db } from '../lib/firebase';
 import { doc, deleteDoc, setDoc } from 'firebase/firestore';
 
@@ -104,6 +105,57 @@ interface AdminPanelProps {
     label: string;
   }) => void;
 }
+
+export const computeCustomerDirectory = (ordersList: OrderData[]): CustomerSummary[] => {
+  const customersMap = new Map<string, CustomerSummary>();
+
+  ordersList.forEach(order => {
+    const isDefaultWalkinEmail = !order.email || order.email.toLowerCase() === 'walkin@tumblespin.com';
+    const key = isDefaultWalkinEmail ? `phone-${order.phone || 'unknown'}` : order.email.toLowerCase();
+
+    const isOffline = order.selectedServices?.includes('Walk-in Counter Service') || 
+                      order.pickupTimeSlot === 'Store Drop-off' || 
+                      order.address === 'Offline Walk-in Customer';
+
+    const price = order.totalPrice || 0;
+
+    if (!customersMap.has(key)) {
+      customersMap.set(key, {
+        key,
+        fullName: order.fullName || 'Anonymous Customer',
+        email: order.email || 'walkin@tumblespin.com',
+        phone: order.phone || 'N/A',
+        address: order.address || 'N/A',
+        offlineOrders: [],
+        onlineOrders: [],
+        totalSpend: 0,
+        totalOfflineSpend: 0
+      });
+    }
+
+    const cust = customersMap.get(key)!;
+    
+    if (isOffline) {
+      cust.offlineOrders.push(order);
+      cust.totalOfflineSpend += price;
+    } else {
+      cust.onlineOrders.push(order);
+    }
+    cust.totalSpend += price;
+
+    if (order.fullName && order.fullName.toLowerCase() !== 'walkin' && cust.fullName === 'Anonymous Customer') {
+      cust.fullName = order.fullName;
+    }
+    if (order.phone && cust.phone === 'N/A') {
+      cust.phone = order.phone;
+    }
+    if (order.address && (cust.address === 'N/A' || cust.address === 'Offline Walk-in Customer')) {
+      cust.address = order.address;
+    }
+  });
+
+  return Array.from(customersMap.values()).sort((a, b) => b.totalSpend - a.totalSpend);
+};
 
 export default function AdminPanel({ 
   isOpen, 
@@ -1519,13 +1571,42 @@ export default function AdminPanel({
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
                 {isAuthorized && (
-                  <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-brand-teal/20 bg-brand-dark/60 text-xs font-bold text-slate-300 shadow-xs"
-                    title="Night Light Mode Active"
-                  >
-                    <Moon className="h-3.5 w-3.5 text-brand-accent fill-brand-accent/20" />
-                    <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wider font-mono text-brand-accent">Night Light</span>
-                  </div>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allCusts = computeCustomerDirectory(orders);
+                        exportCustomersToExcel(allCusts, businessInfo.name);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                      title="Print / Export Entire Customer Data to Excel (.xlsx)"
+                      id="global-export-customer-excel-btn"
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Export Customers (Excel)</span>
+                      <span className="sm:hidden">Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allCusts = computeCustomerDirectory(orders);
+                        printCustomerDirectory(allCusts, businessInfo.name);
+                      }}
+                      className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-brand-deep/80 dark:hover:bg-brand-teal/20 text-slate-700 dark:text-slate-200 border border-slate-200/50 dark:border-brand-teal/10 text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
+                      title="Print entire customer data sheet"
+                      id="global-print-customer-data-btn"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                      <span>Print Sheet</span>
+                    </button>
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-brand-teal/20 bg-brand-dark/60 text-xs font-bold text-slate-300 shadow-xs"
+                      title="Night Light Mode Active"
+                    >
+                      <Moon className="h-3.5 w-3.5 text-brand-accent fill-brand-accent/20" />
+                      <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wider font-mono text-brand-accent">Night Light</span>
+                    </div>
+                  </>
                 )}
                 <button 
                   onClick={onClose}
@@ -2019,13 +2100,27 @@ export default function AdminPanel({
                         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
                           Orders Index {filteredOrders.length !== orders.length ? `(${filteredOrders.length}/${orders.length})` : `(${orders.length})`}
                         </span>
-                        <button 
-                          onClick={loadOrders}
-                          className="text-[10px] font-bold text-brand-primary dark:text-brand-accent flex items-center gap-1 hover:underline cursor-pointer"
-                        >
-                          <RefreshCw className="h-3 w-3" />
-                          Refresh
-                        </button>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allCusts = computeCustomerDirectory(orders);
+                              exportCustomersToExcel(allCusts, businessInfo.name);
+                            }}
+                            className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 hover:underline cursor-pointer"
+                            title="Export entire customer data to Excel (.xlsx)"
+                          >
+                            <FileSpreadsheet className="h-3.5 w-3.5" />
+                            <span>Customers Excel</span>
+                          </button>
+                          <button 
+                            onClick={loadOrders}
+                            className="text-[10px] font-bold text-brand-primary dark:text-brand-accent flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Refresh
+                          </button>
+                        </div>
                       </div>
 
                       {/* Search & Filter controls */}
@@ -3687,66 +3782,7 @@ export default function AdminPanel({
                 )}
 
                 {activeTab === 'customers' && (() => {
-                  // Compute unique customers from order history
-                  const customersMap = new Map<string, {
-                    key: string;
-                    fullName: string;
-                    email: string;
-                    phone: string;
-                    address: string;
-                    offlineOrders: OrderData[];
-                    onlineOrders: OrderData[];
-                    totalSpend: number;
-                    totalOfflineSpend: number;
-                  }>();
-
-                  orders.forEach(order => {
-                    const isDefaultWalkinEmail = !order.email || order.email.toLowerCase() === 'walkin@tumblespin.com';
-                    const key = isDefaultWalkinEmail ? `phone-${order.phone || 'unknown'}` : order.email.toLowerCase();
-
-                    const isOffline = order.selectedServices?.includes('Walk-in Counter Service') || 
-                                      order.pickupTimeSlot === 'Store Drop-off' || 
-                                      order.address === 'Offline Walk-in Customer';
-
-                    const price = order.totalPrice || 0;
-
-                    if (!customersMap.has(key)) {
-                      customersMap.set(key, {
-                        key,
-                        fullName: order.fullName || 'Anonymous Customer',
-                        email: order.email || 'walkin@tumblespin.com',
-                        phone: order.phone || 'N/A',
-                        address: order.address || 'N/A',
-                        offlineOrders: [],
-                        onlineOrders: [],
-                        totalSpend: 0,
-                        totalOfflineSpend: 0
-                      });
-                    }
-
-                    const cust = customersMap.get(key)!;
-                    
-                    if (isOffline) {
-                      cust.offlineOrders.push(order);
-                      cust.totalOfflineSpend += price;
-                    } else {
-                      cust.onlineOrders.push(order);
-                    }
-                    cust.totalSpend += price;
-
-                    // Update values if we encounter a non-default or non-empty value
-                    if (order.fullName && order.fullName.toLowerCase() !== 'walkin' && cust.fullName === 'Anonymous Customer') {
-                      cust.fullName = order.fullName;
-                    }
-                    if (order.phone && cust.phone === 'N/A') {
-                      cust.phone = order.phone;
-                    }
-                    if (order.address && (cust.address === 'N/A' || cust.address === 'Offline Walk-in Customer')) {
-                      cust.address = order.address;
-                    }
-                  });
-
-                  const allCustomers = Array.from(customersMap.values());
+                  const allCustomers = computeCustomerDirectory(orders);
                   const filteredCustomers = allCustomers.filter(c => {
                     const q = customerSearchQuery.toLowerCase();
                     return c.fullName.toLowerCase().includes(q) || 
@@ -3755,19 +3791,40 @@ export default function AdminPanel({
                            c.address.toLowerCase().includes(q);
                   });
 
-                  // Sort by spend descending
-                  filteredCustomers.sort((a, b) => b.totalSpend - a.totalSpend);
-
-                  const selectedCustomer = selectedCustomerKey ? customersMap.get(selectedCustomerKey) : null;
+                  const selectedCustomer = selectedCustomerKey ? allCustomers.find(c => c.key === selectedCustomerKey) || null : null;
 
                   return (
                     <div className="flex-1 overflow-hidden flex flex-col md:flex-row min-h-0">
                       {/* Left Side: Customers list */}
                       <div className={`w-full md:w-2/5 border-r border-slate-100 dark:border-brand-teal/10 flex flex-col min-h-0 bg-slate-50/50 dark:bg-brand-deep/10 ${selectedCustomer ? 'hidden md:flex' : 'flex'}`}>
-                        <div className="p-4 bg-white dark:bg-brand-dark border-b border-slate-100 dark:border-brand-teal/5 flex justify-between items-center shrink-0">
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
-                            Customer Directory ({filteredCustomers.length})
-                          </span>
+                        <div className="p-3.5 bg-white dark:bg-brand-dark border-b border-slate-100 dark:border-brand-teal/5 flex flex-wrap justify-between items-center gap-2 shrink-0">
+                          <div>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider font-mono block">
+                              Customer Directory ({filteredCustomers.length})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => exportCustomersToExcel(filteredCustomers.length > 0 ? filteredCustomers : allCustomers, businessInfo.name)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                              title="Export all customers to Excel (.xlsx) spreadsheet"
+                              id="export-customer-directory-excel-btn"
+                            >
+                              <FileSpreadsheet className="h-3.5 w-3.5" />
+                              <span>Export Excel (.xlsx)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => printCustomerDirectory(filteredCustomers.length > 0 ? filteredCustomers : allCustomers, businessInfo.name)}
+                              className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-brand-deep/80 dark:hover:bg-brand-teal/20 text-slate-700 dark:text-slate-200 border border-slate-200/50 dark:border-brand-teal/10 transition-all cursor-pointer whitespace-nowrap"
+                              title="Print entire customer data sheet"
+                              id="print-customer-directory-btn"
+                            >
+                              <Printer className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Print</span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* Search bar */}
@@ -3868,12 +3925,30 @@ export default function AdminPanel({
                                   </h3>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap gap-2 text-right">
-                                <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[100px]">
+                              <div className="flex flex-wrap items-center gap-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => exportCustomersToExcel([selectedCustomer], businessInfo.name)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all cursor-pointer"
+                                  title="Export this customer data into Excel (.xlsx) sheet"
+                                >
+                                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                                  <span>Excel Sheet</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => printCustomerDirectory([selectedCustomer], businessInfo.name)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-brand-deep/80 dark:hover:bg-brand-teal/20 text-slate-700 dark:text-slate-200 border border-slate-200/50 dark:border-brand-teal/10 transition-all cursor-pointer"
+                                  title="Print customer profile"
+                                >
+                                  <Printer className="h-3.5 w-3.5" />
+                                  <span>Print</span>
+                                </button>
+                                <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[90px]">
                                   <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">Total Spent</span>
                                   <strong className="text-md font-black font-mono text-brand-primary dark:text-brand-accent">₹{selectedCustomer.totalSpend}</strong>
                                 </div>
-                                <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[100px]">
+                                <div className="bg-slate-50 dark:bg-brand-deep/30 border border-slate-100 dark:border-brand-teal/5 rounded-2xl p-3 text-center min-w-[90px]">
                                   <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">Offline Spent</span>
                                   <strong className="text-md font-black font-mono text-emerald-600 dark:text-emerald-400">₹{selectedCustomer.totalOfflineSpend}</strong>
                                 </div>
@@ -4054,13 +4129,43 @@ export default function AdminPanel({
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 bg-slate-50/30 dark:bg-brand-deep/5">
                       <div className="max-w-5xl mx-auto space-y-6">
                         {/* Header */}
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-extrabold text-slate-800 dark:text-white uppercase tracking-wider font-mono">
-                            📈 30-Day Revenue & Performance Insights
-                          </h4>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">
-                            Real-time analytics showing daily revenue trends, order volume splits, and digital concierge performance.
-                          </p>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-extrabold text-slate-800 dark:text-white uppercase tracking-wider font-mono">
+                              📈 30-Day Revenue & Performance Insights
+                            </h4>
+                            <p className="text-xs text-slate-400 dark:text-slate-500">
+                              Real-time analytics showing daily revenue trends, order volume splits, and digital concierge performance.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allCusts = computeCustomerDirectory(orders);
+                                exportCustomersToExcel(allCusts, businessInfo.name);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                              title="Export entire customer database to Excel (.xlsx)"
+                              id="analytics-export-customers-excel-btn"
+                            >
+                              <FileSpreadsheet className="h-3.5 w-3.5" />
+                              <span>Export All Customers (.xlsx)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allCusts = computeCustomerDirectory(orders);
+                                printCustomerDirectory(allCusts, businessInfo.name);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-brand-deep/80 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-brand-teal/10 shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                              title="Print customer directory report"
+                              id="analytics-print-customers-btn"
+                            >
+                              <Printer className="h-3.5 w-3.5" />
+                              <span>Print Customers</span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* Summary Metrics Grid */}
