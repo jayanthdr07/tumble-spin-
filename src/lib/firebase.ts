@@ -35,7 +35,9 @@ const SYNC_KEYS = [
   'tumblespin_deleted_orders',
   'tumblespin_business_info',
   'tumblespin_inventory',
-  'tumblespin_memberships'
+  'tumblespin_memberships',
+  'tumblespin_custom_catalog_items_v3',
+  'tumblespin_deleted_catalog_item_ids_v1'
 ];
 
 export enum OperationType {
@@ -455,7 +457,7 @@ export function initializeFirebaseSync(isAdmin: boolean = false) {
     const unsubSettings = onSnapshot(collection(db, 'settings'), (snapshot) => {
       try {
         const docIds = snapshot.docs.map(doc => doc.id);
-        const keysToSeed = ['admin_profile', 'promo', 'dynamic_pricing', 'custom_prices', 'admin_password', 'master_password', 'deleted_orders', 'business_info', 'inventory'];
+        const keysToSeed = ['admin_profile', 'promo', 'dynamic_pricing', 'custom_prices', 'admin_password', 'master_password', 'deleted_orders', 'business_info', 'inventory', 'custom_catalog_items_v3', 'deleted_catalog_item_ids_v1'];
         keysToSeed.forEach(id => {
           if (!docIds.includes(id)) {
             const key = `tumblespin_${id}`;
@@ -482,6 +484,15 @@ export function initializeFirebaseSync(isAdmin: boolean = false) {
               localStorage.setItem(key, incomingStr);
               isSyncingIncoming = false;
               window.dispatchEvent(new Event('storage'));
+              if (docId === 'custom_prices') {
+                window.dispatchEvent(new CustomEvent('tumblespin_custom_prices_updated', { detail: docData.data }));
+              }
+              if (docId === 'custom_catalog_items_v3') {
+                window.dispatchEvent(new CustomEvent('tumblespin_catalog_updated', { detail: docData.data }));
+              }
+              if (docId === 'deleted_catalog_item_ids_v1') {
+                window.dispatchEvent(new CustomEvent('tumblespin_catalog_deleted_updated', { detail: docData.data }));
+              }
             }
           }
         });

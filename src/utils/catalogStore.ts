@@ -104,6 +104,43 @@ export const getCategoryLabel = (categoryId: string): string => {
   return cat ? cat.name : categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
 };
 
+// Helper to sync price override immediately into tumblespin_custom_prices
+export const syncPriceOverrideToCustomPrices = (
+  itemId: string,
+  price: number,
+  serviceKey?: string,
+  estimatorItemId?: string
+) => {
+  try {
+    const saved = localStorage.getItem('tumblespin_custom_prices');
+    const parsed = saved ? JSON.parse(saved) : { services: {}, estimator: {}, booking: {} };
+    if (!parsed.booking) parsed.booking = {};
+    if (!parsed.services) parsed.services = {};
+    if (!parsed.estimator) parsed.estimator = {};
+
+    parsed.booking[itemId] = price;
+    if (serviceKey) parsed.services[serviceKey] = price;
+    if (estimatorItemId) {
+      parsed.estimator[estimatorItemId] = {
+        ...(parsed.estimator[estimatorItemId] || {}),
+        dryClean: price
+      };
+    } else {
+      parsed.estimator[itemId] = {
+        ...(parsed.estimator[itemId] || {}),
+        dryClean: price
+      };
+    }
+
+    localStorage.setItem('tumblespin_custom_prices', JSON.stringify(parsed));
+    setDoc(doc(db, 'settings', 'custom_prices'), { data: parsed }, { merge: true }).catch(() => {});
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('tumblespin_custom_prices_updated', { detail: parsed }));
+  } catch (err) {
+    console.warn('[CatalogStore] Error syncing price to custom prices:', err);
+  }
+};
+
 // Persist catalog both locally and in Firestore
 export const saveCatalogItems = async (
   items: MasterPricingItem[], 
@@ -129,7 +166,11 @@ export const saveCatalogItems = async (
       deletedItemIds: deletedIds,
       lastUpdated: new Date().toISOString(),
       updatedBy,
-      totalCount: sanitizedItems.length
+      totalCount: sanitizedItems.length,
+      data: {
+        items: sanitizedItems,
+        deletedItemIds: deletedIds
+      }
     }, { merge: true });
 
     return true;
@@ -161,6 +202,12 @@ export const addCatalogItem = async (
 
   const updatedList = [newItem, ...currentItems.filter(i => i.id !== id)];
   await saveCatalogItems(updatedList, updatedBy, currentDeleted);
+
+  // Sync initial price to custom_prices
+  if (newItem.defaultPrice !== undefined) {
+    syncPriceOverrideToCustomPrices(newItem.id, newItem.defaultPrice, newItem.serviceKey, newItem.estimatorItemId);
+  }
+
   return newItem;
 };
 
@@ -174,7 +221,7 @@ export const updateCatalogItem = async (
   const index = currentItems.findIndex(item => item.id === itemId);
 
   if (index === -1) {
-    // If not found, add it as a modified item
+    // If not found, check base catalog
     const baseMatch = MASTER_PRICING_CATALOG.find(b => b.id === itemId);
     if (baseMatch) {
       const merged: MasterPricingItem = {
@@ -184,6 +231,9 @@ export const updateCatalogItem = async (
       };
       currentItems.push(merged);
       await saveCatalogItems(currentItems, updatedBy);
+      if (updatedFields.defaultPrice !== undefined) {
+        syncPriceOverrideToCustomPrices(itemId, updatedFields.defaultPrice, baseMatch.serviceKey, baseMatch.estimatorItemId);
+      }
       return true;
     }
     return false;
@@ -196,6 +246,9 @@ export const updateCatalogItem = async (
   };
 
   await saveCatalogItems(currentItems, updatedBy);
+  if (updatedFields.defaultPrice !== undefined) {
+    syncPriceOverrideToCustomPrices(itemId, updatedFields.defaultPrice, currentItems[index].serviceKey, currentItems[index].estimatorItemId);
+  }
   return true;
 };
 
@@ -256,12 +309,16 @@ export const useMasterCatalog = () => {
 
         const activeDeletedSet = new Set([...getDeletedCatalogItemIds(), ...firestoreDeleted]);
 
-        if (Array.isArray(data?.items)) {
-          const validItems = data.items.filter((i: MasterPricingItem) => !activeDeletedSet.has(i.id));
+        const incomingItems = Array.isArray(data?.items) ? data.items : (Array.isArray(data?.data?.items) ? data.data.items : null);
+        if (incomingItems) {
+          const validItems = incomingItems.filter((i: MasterPricingItem) => !activeDeletedSet.has(i.id));
           cachedCatalogItems = validItems;
           localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify(validItems));
           setItems(validItems);
         }
+      } else {
+        // Document does not exist yet in Firestore - seed it immediately from local store/base catalog!
+        saveCatalogItems(getStoredCatalogItems(), 'system_seed');
       }
       setIsLoading(false);
     }, (err) => {

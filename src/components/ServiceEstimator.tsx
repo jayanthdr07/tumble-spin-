@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Calculator, ShoppingBag, Plus, Minus, Trash2, Sparkles, 
@@ -6,7 +6,7 @@ import {
   Layers, Home, Briefcase, Scissors
 } from 'lucide-react';
 import { getItemIcon } from '../utils/itemIcons';
-import { getDeletedCatalogItemIds } from '../utils/catalogStore';
+import { getDeletedCatalogItemIds, useMasterCatalog } from '../utils/catalogStore';
 
 export interface EstimatorItem {
   id: string;
@@ -156,12 +156,66 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     };
   }, []);
 
+  const { items: liveCatalogItems } = useMasterCatalog();
   const deletedIds = getDeletedCatalogItemIds();
-  const filteredItems = ESTIMATOR_ITEMS.filter(item => {
-    if (item.category !== activeCategory) return false;
-    if (deletedIds.includes(item.id)) return false;
-    return true;
-  });
+
+  // Dynamically merge base ESTIMATOR_ITEMS with liveCatalogItems from database
+  const allEstimatorItems: EstimatorItem[] = useMemo(() => {
+    const deletedSet = new Set(deletedIds);
+    const result: EstimatorItem[] = [];
+    const processedIds = new Set<string>();
+
+    // 1. Process base items, updating with live catalog default prices if modified
+    ESTIMATOR_ITEMS.forEach(baseItem => {
+      if (deletedSet.has(baseItem.id)) return;
+      processedIds.add(baseItem.id);
+
+      const liveMatch = liveCatalogItems.find(c => c.id === baseItem.id || c.estimatorItemId === baseItem.id);
+      if (liveMatch) {
+        result.push({
+          ...baseItem,
+          name: liveMatch.name || baseItem.name,
+          dryCleanPrice: liveMatch.defaultPrice !== undefined ? liveMatch.defaultPrice : baseItem.dryCleanPrice,
+          steamIronPrice: liveMatch.estimatorSteamIronDefault !== undefined ? liveMatch.estimatorSteamIronDefault : baseItem.steamIronPrice,
+          unit: liveMatch.unit || baseItem.unit
+        });
+      } else {
+        result.push(baseItem);
+      }
+    });
+
+    // 2. Add any newly created or custom catalog items
+    liveCatalogItems.forEach(liveItem => {
+      if (processedIds.has(liveItem.id) || (liveItem.estimatorItemId && processedIds.has(liveItem.estimatorItemId))) {
+        return;
+      }
+      if (deletedSet.has(liveItem.id)) return;
+      processedIds.add(liveItem.id);
+
+      const isKg = (liveItem.unit && liveItem.unit.toLowerCase().includes('kg')) || liveItem.category === 'laundry';
+      const catNorm = liveItem.category === 'woolens' ? 'woolen' : liveItem.category;
+
+      result.push({
+        id: liveItem.id,
+        name: liveItem.name,
+        category: catNorm,
+        dryCleanPrice: liveItem.defaultPrice || 0,
+        steamIronPrice: liveItem.estimatorSteamIronDefault ?? null,
+        unit: isKg ? 'kg' : (liveItem.unit && liveItem.unit !== 'per pc' ? liveItem.unit : undefined)
+      });
+    });
+
+    return result;
+  }, [liveCatalogItems, deletedIds]);
+
+  const filteredItems = useMemo(() => {
+    return allEstimatorItems.filter(item => {
+      const catNorm = item.category === 'woolens' ? 'woolen' : item.category;
+      const activeNorm = activeCategory === 'woolens' ? 'woolen' : activeCategory;
+      if (catNorm !== activeNorm) return false;
+      return true;
+    });
+  }, [allEstimatorItems, activeCategory]);
 
   const handleServiceTypeChange = (itemId: string, type: 'Dry Clean' | 'Steam Iron') => {
     setSelectedServiceType(prev => ({
@@ -186,6 +240,16 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     const bookingOverride = customPrices?.booking?.[item.id];
     if (bookingOverride !== undefined && bookingOverride !== null && bookingOverride !== '' && type === 'Dry Clean') {
       return Number(bookingOverride);
+    }
+    // Check live catalog item
+    const liveMatch = liveCatalogItems.find(c => c.id === item.id || c.estimatorItemId === item.id);
+    if (liveMatch) {
+      if (type === 'Dry Clean' && liveMatch.defaultPrice !== undefined) {
+        return liveMatch.defaultPrice;
+      }
+      if (type === 'Steam Iron' && liveMatch.estimatorSteamIronDefault !== undefined) {
+        return liveMatch.estimatorSteamIronDefault;
+      }
     }
     if (type === 'Dry Clean') return item.dryCleanPrice || 0;
     return item.steamIronPrice || 0;
@@ -223,8 +287,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     setCart(prev => {
       return prev.map(i => {
         if (`${i.id}-${i.serviceType}` === cartKey) {
-          const step = i.unit === 'kg' ? (Math.abs(change) < 1 ? change : change) : change;
-          const newQty = Math.round((i.quantity + step) * 10) / 10;
+          const newQty = Math.round((i.quantity + change) * 100) / 100;
           return newQty > 0 ? { ...i, quantity: newQty } : null;
         }
         return i;
@@ -234,7 +297,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
 
   const setDirectQuantity = (id: string, type: 'Dry Clean' | 'Steam Iron', rawQty: number) => {
     const cartKey = `${id}-${type}`;
-    const cleanQty = Math.max(0, Math.round(rawQty * 10) / 10);
+    const cleanQty = Math.max(0, Math.round(rawQty * 100) / 100);
     setCart(prev => {
       return prev.map(i => {
         if (`${i.id}-${i.serviceType}` === cartKey) {
@@ -444,12 +507,20 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {item.unit === 'kg' ? (
+                        {item.unit === 'kg' || item.unit?.includes('kg') || item.id.startsWith('laundry-') ? (
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => updateQuantity(item.id, item.serviceType, -0.1)}
+                              onClick={() => updateQuantity(item.id, item.serviceType, -0.5)}
                               className="px-1.5 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
+                              title="Subtract 0.5 kg"
+                            >
+                              -0.5
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, item.serviceType, -0.1)}
+                              className="px-1 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
                               title="Subtract 0.1 kg"
                             >
                               -0.1
@@ -464,17 +535,25 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                                   const val = parseFloat(e.target.value);
                                   if (!isNaN(val)) setDirectQuantity(item.id, item.serviceType, val);
                                 }}
-                                className="w-10 text-center text-xs font-black font-mono text-slate-800 dark:text-white bg-transparent focus:outline-hidden"
+                                className="w-12 text-center text-xs font-black font-mono text-slate-800 dark:text-white bg-transparent focus:outline-hidden"
                               />
                               <span className="text-[9px] font-mono font-bold text-slate-400">KG</span>
                             </div>
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.id, item.serviceType, 0.1)}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
+                              className="px-1 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
                               title="Add 0.1 kg"
                             >
                               +0.1
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, item.serviceType, 0.5)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold border border-slate-200 dark:border-brand-teal/20 bg-white dark:bg-brand-deep/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-brand-dark/40 cursor-pointer"
+                              title="Add 0.5 kg"
+                            >
+                              +0.5
                             </button>
                           </div>
                         ) : (

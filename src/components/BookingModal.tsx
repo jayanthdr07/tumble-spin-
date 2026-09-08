@@ -14,7 +14,7 @@ import InteractiveMiniMap from './InteractiveMiniMap';
 import { useBusinessInfo } from '../utils/useBusinessInfo';
 import { db, isFirestoreSuspended } from '../lib/firebase';
 import { doc, setDoc, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
-import { useMasterCatalog } from '../utils/catalogStore';
+import { useMasterCatalog, getDeletedCatalogItemIds } from '../utils/catalogStore';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -241,7 +241,10 @@ export default function BookingModal({
   const { items: liveCatalogItems } = useMasterCatalog();
 
   const effectiveSubServices = React.useMemo(() => {
-    const baseMerged = SUB_SERVICES.map(service => {
+    const deletedIds = getDeletedCatalogItemIds();
+    const deletedSet = new Set(deletedIds);
+
+    const baseMerged = SUB_SERVICES.filter(s => !deletedSet.has(s.id)).map(service => {
       const override = customPrices?.booking?.[service.id];
       if (override !== undefined && override !== null && override !== '') {
         return { ...service, price: Number(override) };
@@ -251,20 +254,31 @@ export default function BookingModal({
       if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '') {
         return { ...service, price: Number(estimatorOverride) };
       }
+      // Check live catalog default price
+      const liveMatch = liveCatalogItems.find(c => c.id === service.id || c.estimatorItemId === service.id);
+      if (liveMatch && liveMatch.defaultPrice !== undefined) {
+        return { ...service, price: liveMatch.defaultPrice };
+      }
       return service;
     });
 
-    // Merge custom items from master catalog
+    // Merge custom or newly added items from master catalog
     const baseSubIds = new Set(baseMerged.map(s => s.id));
     const customSubServices: SubService[] = liveCatalogItems
-      .filter(item => !baseSubIds.has(item.id) && item.isCustom)
-      .map(item => ({
-        id: item.id,
-        name: item.name + (item.unit && item.unit !== 'per pc' ? ` (${item.unit})` : ''),
-        category: item.category === 'woolen' ? 'woolens' : item.category,
-        price: item.defaultPrice || 99,
-        serviceType: item.serviceType || 'Custom Care'
-      }));
+      .filter(item => !baseSubIds.has(item.id) && !deletedSet.has(item.id))
+      .map(item => {
+        const override = customPrices?.booking?.[item.id];
+        const estimatorOverride = item.estimatorItemId ? customPrices?.estimator?.[item.estimatorItemId]?.dryClean : undefined;
+        const livePrice = override !== undefined ? Number(override) : (estimatorOverride !== undefined ? Number(estimatorOverride) : (item.defaultPrice || 99));
+
+        return {
+          id: item.id,
+          name: item.name + (item.unit && item.unit !== 'per pc' ? ` (${item.unit})` : ''),
+          category: item.category === 'woolen' ? 'woolens' : item.category,
+          price: livePrice,
+          serviceType: item.serviceType || 'Custom Care'
+        };
+      });
 
     return [...baseMerged, ...customSubServices];
   }, [customPrices, liveCatalogItems]);
@@ -2807,26 +2821,76 @@ export default function BookingModal({
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-1.5 shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => updateQuantity(item.id, -1)}
-                                        disabled={qty <= 0}
-                                        className="h-6 w-6 rounded-md bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
-                                      >
-                                        <Minus className="h-3 w-3" />
-                                      </button>
-                                      <span className="w-6 text-center text-xs font-bold font-mono">
-                                        {qty}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => updateQuantity(item.id, 1)}
-                                        className="h-6 w-6 rounded-md bg-teal-600 text-white flex items-center justify-center hover:bg-teal-700 cursor-pointer"
-                                      >
-                                        <Plus className="h-3 w-3" />
-                                      </button>
-                                    </div>
+                                    {item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg') ? (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, -0.5)}
+                                          disabled={qty <= 0}
+                                          className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                                          title="-0.5 KG"
+                                        >
+                                          -0.5
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, -0.1)}
+                                          disabled={qty <= 0}
+                                          className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                                          title="-0.1 KG"
+                                        >
+                                          -0.1
+                                        </button>
+                                        <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1">
+                                          <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0"
+                                            value={qty}
+                                            onChange={(e) => setDirectQuantity(item.id, parseFloat(e.target.value) || 0)}
+                                            className="w-10 text-center text-xs font-bold font-mono text-teal-700 dark:text-teal-300 bg-transparent focus:outline-hidden"
+                                          />
+                                          <span className="text-[8px] font-bold text-slate-400">KG</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, 0.1)}
+                                          className="px-1 py-0.5 rounded bg-teal-50 dark:bg-teal-950/40 text-[10px] font-bold text-teal-600 hover:bg-teal-100 cursor-pointer"
+                                          title="+0.1 KG"
+                                        >
+                                          +0.1
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, 0.5)}
+                                          className="px-1.5 py-0.5 rounded bg-teal-600 text-[10px] font-bold text-white hover:bg-teal-700 cursor-pointer"
+                                          title="+0.5 KG"
+                                        >
+                                          +0.5
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, -1)}
+                                          disabled={qty <= 0}
+                                          className="h-6 w-6 rounded-md bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                                        >
+                                          <Minus className="h-3 w-3" />
+                                        </button>
+                                        <span className="w-6 text-center text-xs font-bold font-mono">
+                                          {qty}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateQuantity(item.id, 1)}
+                                          className="h-6 w-6 rounded-md bg-teal-600 text-white flex items-center justify-center hover:bg-teal-700 cursor-pointer"
+                                        >
+                                          <Plus className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -3538,25 +3602,75 @@ export default function BookingModal({
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity(item.id, -1)}
-                                  className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </button>
-                                <span className="text-xs font-bold font-mono text-slate-800 dark:text-white w-5 text-center">
-                                  {qty}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity(item.id, 1)}
-                                  className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </button>
-                              </div>
+                              {item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg') ? (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, -0.5)}
+                                    disabled={qty <= 0}
+                                    className="px-1.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-50 cursor-pointer"
+                                    title="-0.5 KG"
+                                  >
+                                    -0.5
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, -0.1)}
+                                    disabled={qty <= 0}
+                                    className="px-1 py-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-50 cursor-pointer"
+                                    title="-0.1 KG"
+                                  >
+                                    -0.1
+                                  </button>
+                                  <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-0.5">
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={qty}
+                                      onChange={(e) => setDirectQuantity(item.id, parseFloat(e.target.value) || 0)}
+                                      className="w-11 text-center text-xs font-bold font-mono text-brand-primary dark:text-brand-accent bg-transparent focus:outline-hidden"
+                                    />
+                                    <span className="text-[9px] font-bold text-slate-400">KG</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, 0.1)}
+                                    className="px-1 py-1 rounded-lg border border-brand-primary/20 bg-brand-primary/5 text-brand-primary dark:text-brand-accent text-[10px] font-bold hover:bg-brand-primary/10 cursor-pointer"
+                                    title="+0.1 KG"
+                                  >
+                                    +0.1
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, 0.5)}
+                                    className="px-1.5 py-1 rounded-lg bg-brand-primary text-white text-[10px] font-bold hover:bg-brand-deep cursor-pointer"
+                                    title="+0.5 KG"
+                                  >
+                                    +0.5
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, -1)}
+                                    className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
+                                  >
+                                    <Minus className="h-3 w-3" />
+                                  </button>
+                                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-white w-5 text-center">
+                                    {qty}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, 1)}
+                                    className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
+                                  >
+                                    <Plus className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

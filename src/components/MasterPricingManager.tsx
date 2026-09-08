@@ -11,7 +11,7 @@ import {
   MASTER_PRICING_CATEGORIES, 
   MasterPricingItem 
 } from '../data/masterPricingCatalog';
-import { useMasterCatalog } from '../utils/catalogStore';
+import { useMasterCatalog, saveCatalogItems } from '../utils/catalogStore';
 import { db } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -273,14 +273,26 @@ export default function MasterPricingManager({
     }
     setIsSubmittingItem(true);
     try {
-      await addItem({
+      const price = parseFloat(String(newItemData.defaultPrice)) || 99;
+      const createdItem = await addItem({
         name: newItemData.name.trim(),
         category: newItemData.category,
-        defaultPrice: Number(newItemData.defaultPrice) || 99,
-        unit: newItemData.unit || 'per pc',
-        serviceType: newItemData.serviceType || 'Premium Care',
+        defaultPrice: price,
+        unit: newItemData.unit || (newItemData.category === 'laundry' ? 'per kg' : 'per pc'),
+        serviceType: newItemData.serviceType || (newItemData.category === 'laundry' ? 'Wash & Fold' : 'Premium Dry Clean'),
         description: newItemData.description.trim()
       });
+
+      // Populate into current draftPrices
+      setDraftPrices((prev: any) => ({
+        ...prev,
+        booking: { ...prev.booking, [createdItem.id]: price },
+        estimator: {
+          ...prev.estimator,
+          [createdItem.id]: { dryClean: price, steamIron: null }
+        }
+      }));
+
       setShowAddModal(false);
       setNewItemData({
         name: '',
@@ -290,7 +302,7 @@ export default function MasterPricingManager({
         serviceType: 'Premium Dry Clean',
         description: ''
       });
-      setSuccessMsg('✨ New item added to catalog and synchronized live with Firestore!');
+      setSuccessMsg('✨ New item added to catalog, database, booking, and estimator!');
       setTimeout(() => setSuccessMsg(''), 4500);
     } catch (err) {
       console.error('Error adding item:', err);
@@ -306,16 +318,40 @@ export default function MasterPricingManager({
     if (!editingItem || !editingItem.name.trim()) return;
     setIsSubmittingItem(true);
     try {
+      const price = parseFloat(String(editingItem.defaultPrice)) || 0;
       await updateItem(editingItem.id, {
         name: editingItem.name.trim(),
         category: editingItem.category,
-        defaultPrice: Number(editingItem.defaultPrice) || 0,
+        defaultPrice: price,
         unit: editingItem.unit || 'per pc',
         serviceType: editingItem.serviceType || 'Premium Care',
         description: editingItem.description?.trim() || ''
       });
+
+      // Update draft prices
+      setDraftPrices((prev: any) => {
+        const newBooking = { ...prev.booking, [editingItem.id]: price };
+        const newEstimator = { ...prev.estimator };
+        if (editingItem.estimatorItemId) {
+          newEstimator[editingItem.estimatorItemId] = {
+            ...(newEstimator[editingItem.estimatorItemId] || {}),
+            dryClean: price
+          };
+        } else {
+          newEstimator[editingItem.id] = {
+            ...(newEstimator[editingItem.id] || {}),
+            dryClean: price
+          };
+        }
+        return {
+          ...prev,
+          booking: newBooking,
+          estimator: newEstimator
+        };
+      });
+
       setEditingItem(null);
-      setSuccessMsg('✨ Item details updated and synced across all pages!');
+      setSuccessMsg('✨ Item details and price updated across all modules!');
       setTimeout(() => setSuccessMsg(''), 4500);
     } catch (err) {
       console.error('Error updating item:', err);
@@ -381,7 +417,37 @@ export default function MasterPricingManager({
         console.warn('Firestore direct write warning:', fsErr);
       }
 
-      // 4. Dispatch events for real-time reactivity
+      // 4. Update master_catalog items defaultPrice matching draftPrices
+      try {
+        let catalogChanged = false;
+        const updatedCatalog = liveCatalogItems.map(item => {
+          const customBooking = sanitized.booking[item.id];
+          const customEstimatorDry = item.estimatorItemId ? sanitized.estimator[item.estimatorItemId]?.dryClean : undefined;
+          const customEstimatorSteam = item.estimatorItemId ? sanitized.estimator[item.estimatorItemId]?.steamIron : undefined;
+          
+          const newPrice = customBooking !== undefined ? customBooking : (customEstimatorDry !== undefined ? customEstimatorDry : item.defaultPrice);
+          const newSteam = customEstimatorSteam !== undefined ? customEstimatorSteam : item.estimatorSteamIronDefault;
+
+          if (newPrice !== item.defaultPrice || newSteam !== item.estimatorSteamIronDefault) {
+            catalogChanged = true;
+            return {
+              ...item,
+              defaultPrice: newPrice,
+              estimatorSteamIronDefault: newSteam,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return item;
+        });
+
+        if (catalogChanged) {
+          await saveCatalogItems(updatedCatalog, 'admin');
+        }
+      } catch (catErr) {
+        console.warn('Catalog defaultPrice update warning:', catErr);
+      }
+
+      // 5. Dispatch events for real-time reactivity
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new CustomEvent('tumblespin_custom_prices_updated', { detail: sanitized }));
 
