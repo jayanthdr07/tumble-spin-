@@ -4,7 +4,8 @@ import {
   X, Calendar, Clock, MapPin, Sparkles, CheckCircle2, ChevronRight, 
   ChevronLeft, Info, ShoppingBag, ShieldCheck, Heart, Mail, MessageSquare, 
   Plus, Minus, Shirt, ShoppingCart, ListCollapse, Star, FileText,
-  Sun, SunDim, Sunset, Moon, CreditCard, ExternalLink, Check, Loader2
+  Sun, SunDim, Sunset, Moon, CreditCard, ExternalLink, Check, Loader2,
+  Store, QrCode, User, Phone, Copy
 } from 'lucide-react';
 import { BookingDetails } from '../types';
 import { downloadInvoice } from '../utils/invoiceGenerator';
@@ -22,6 +23,7 @@ interface BookingModalProps {
   initialQuantities?: Record<string, number>;
   initialStep?: number;
   initialWhatsAppMode?: boolean;
+  initialBookingType?: 'doorstep' | 'instore';
   dynamicPricing?: {
     mode: 'surcharge' | 'discount' | 'none';
     percentage: number;
@@ -199,6 +201,7 @@ export default function BookingModal({
   initialQuantities,
   initialStep,
   initialWhatsAppMode, 
+  initialBookingType,
   dynamicPricing 
 }: BookingModalProps) {
   const businessInfo = useBusinessInfo();
@@ -323,6 +326,7 @@ export default function BookingModal({
     }) || null;
   };
 
+  const [bookingType, setBookingType] = useState<'doorstep' | 'instore'>(initialBookingType || 'doorstep');
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [bookingDetails, setBookingDetails] = useState<Partial<BookingDetails>>({
     services: [],
@@ -615,6 +619,7 @@ export default function BookingModal({
   // Set initial service if passed, and reset state on close
   useEffect(() => {
     if (isOpen) {
+      setBookingType(initialBookingType || 'doorstep');
       setIsSuccess(false);
       setPaymentStatus('idle');
       setIsSubmitting(false);
@@ -913,7 +918,53 @@ export default function BookingModal({
     return selectedServices.includes('hassle-free') || isFromEstimator || (initialQuantities !== undefined && Object.keys(initialQuantities).length > 0);
   };
 
+  const todayFormatted = new Date().toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
   const handleNextStep = () => {
+    if (bookingType === 'instore') {
+      if (step === 1) {
+        if (selectedServices.length === 0 && getSelectedItemsWithDetails().length === 0) {
+          setFormErrors({ services: 'Please select at least one service module or garment to proceed' });
+          return;
+        }
+        setFormErrors({});
+        const todayStr = new Date().toISOString().split('T')[0];
+        setBookingDetails(prev => ({
+          ...prev,
+          pickupDate: todayStr,
+          pickupTimeSlot: 'Store Drop-off',
+          deliveryDate: todayStr,
+          deliveryTimeSlot: 'Store Pickup',
+          address: 'In-Store Drop-off (Store Counter)'
+        }));
+        setStep(2);
+      } else if (step === 2) {
+        const errors: Record<string, string> = {};
+        if (!bookingDetails.fullName?.trim()) {
+          errors.fullName = 'Customer Full Name is required';
+        }
+        if (!bookingDetails.phone?.trim()) {
+          errors.phone = 'Customer Mobile Number is required';
+        } else if (bookingDetails.phone.replace(/\D/g, '').length < 8) {
+          errors.phone = 'Please enter a valid mobile number (min 8 digits)';
+        }
+        if (bookingDetails.email?.trim() && !/\S+@\S+\.\S+/.test(bookingDetails.email)) {
+          errors.email = 'Invalid email address';
+        }
+        if (Object.keys(errors).length > 0) {
+          setFormErrors(errors);
+          return;
+        }
+        setFormErrors({});
+        setStep(3);
+      }
+      return;
+    }
+
     if (step === 1) {
       if (selectedServices.length === 0) {
         setFormErrors({ services: 'Please select at least one service module to proceed' });
@@ -946,6 +997,10 @@ export default function BookingModal({
 
   const handlePrevStep = () => {
     setFormErrors({});
+    if (bookingType === 'instore') {
+      setStep(prev => Math.max(prev - 1, 1));
+      return;
+    }
     if (step === 4) {
       if (shouldSkipStep3()) {
         setStep(2);
@@ -988,9 +1043,128 @@ export default function BookingModal({
     return `TS-2026-${nextNum}`;
   };
 
+  const handleInstoreOrderSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSubmitting(true);
+    setFormErrors({});
+
+    try {
+      const clientOrderId = generatedOrderId || await generateUniqueOrderId();
+      const currentDate = new Date().toISOString().split('T')[0];
+      const grandTotal = Number(getGrandTotal());
+
+      const orderTimeline = [
+        { step: 1, title: 'In-Store Drop-off Received', desc: 'Garments handed over at store counter and invoiced.', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), done: true, active: true },
+        { step: 2, title: 'In-Facility Fabric Screening', desc: 'Garments sorted and prepared for specialist cleaning program.', time: 'Pending', done: false, active: false },
+        { step: 3, title: 'Returned Flawless', desc: 'Garments refreshed, hand-finished and ready at store counter.', time: 'Pending', done: false, active: false }
+      ];
+
+      const selectedItems = getSelectedItemsWithDetails();
+      const newOrderDoc = {
+        orderId: clientOrderId,
+        adminViewed: false,
+        fullName: bookingDetails.fullName?.trim() || 'In-Store Walk-in Customer',
+        email: bookingDetails.email?.trim() || 'walkin@tumblespin.com',
+        phone: bookingDetails.phone?.trim() || '',
+        address: 'In-Store Drop-off (Store Counter)',
+        pickupDate: currentDate,
+        pickupTimeSlot: 'Store Drop-off',
+        deliveryDate: currentDate,
+        deliveryTimeSlot: 'Store Pickup',
+        garmentCareOption: bookingDetails.garmentCareOption || 'standard',
+        specialInstructions: bookingDetails.specialInstructions?.trim() || '',
+        selectedServices: Array.from(new Set([...selectedServices, 'Walk-in Counter Service'])),
+        subServices: selectedItems.length > 0 ? selectedItems.map(item => ({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          price: adjustPrice(item.price),
+          quantity: item.quantity,
+          serviceType: item.serviceType
+        })) : [
+          {
+            id: 'instore-counter-service',
+            name: selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ') || 'Walk-in Garment Care',
+            category: 'laundry',
+            price: grandTotal,
+            quantity: 1,
+            serviceType: 'In-Store Counter Service'
+          }
+        ],
+        totalPrice: grandTotal,
+        status: 'Order Confirmed',
+        orderStatus: 'Confirmed',
+        orderType: 'instore',
+        smsOptIn: smsOptIn,
+        timeline: orderTimeline,
+        paymentMethod: 'UPI / Dynamic QR',
+        paymentDetails: {
+          type: 'UPI_QR_INSTORE',
+          label: 'UPI Dynamic QR (In-Store)',
+          details: 'Settled via In-Store Dynamic UPI QR code.'
+        },
+        paymentStatus: 'paid',
+        createdAt: new Date().toISOString()
+      };
+
+      const localOrdersStr = localStorage.getItem('tumblespin_orders') || '[]';
+      let localOrders = [];
+      try {
+        localOrders = JSON.parse(localOrdersStr);
+        if (!Array.isArray(localOrders)) localOrders = [];
+      } catch (err) {}
+      localOrders.unshift(newOrderDoc);
+      localStorage.setItem('tumblespin_orders', JSON.stringify(localOrders));
+
+      try {
+        await setDoc(doc(db, 'orders', clientOrderId), newOrderDoc);
+      } catch (fsErr) {
+        console.warn('Firestore write warning:', fsErr);
+      }
+
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('tumblespin_new_order_alert', { detail: newOrderDoc }));
+
+      try {
+        downloadInvoice({
+          orderId: newOrderDoc.orderId,
+          fullName: newOrderDoc.fullName,
+          email: newOrderDoc.email,
+          phone: newOrderDoc.phone,
+          address: newOrderDoc.address,
+          pickupDate: newOrderDoc.pickupDate,
+          pickupTimeSlot: newOrderDoc.pickupTimeSlot,
+          deliveryDate: newOrderDoc.deliveryDate,
+          deliveryTimeSlot: newOrderDoc.deliveryTimeSlot,
+          garmentCareOption: newOrderDoc.garmentCareOption,
+          specialInstructions: newOrderDoc.specialInstructions,
+          subServices: newOrderDoc.subServices,
+          totalPrice: newOrderDoc.totalPrice,
+          createdAt: newOrderDoc.createdAt,
+          paymentMethod: newOrderDoc.paymentMethod,
+          dynamicPricing: dynamicPricing
+        });
+      } catch (pdfErr) {
+        console.warn('PDF invoice download warning:', pdfErr);
+      }
+
+      setGeneratedOrderId(clientOrderId);
+      setIsSuccess(true);
+    } catch (err: any) {
+      console.error('In-store order error:', err);
+      setFormErrors({ general: 'In-store booking failed: ' + err.message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Initiates secure order creation on backend and retrieves real QR Code
   const handleSubmitBooking = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (bookingType === 'instore') {
+      await handleInstoreOrderSubmit(e);
+      return;
+    }
     setIsSubmitting(true);
     setFormErrors({});
 
@@ -1574,29 +1748,39 @@ export default function BookingModal({
   };
 
   const handleDownloadSuccessInvoice = () => {
+    const selectedItems = getSelectedItemsWithDetails();
     const formattedBooking = {
       orderId: generatedOrderId,
       fullName: bookingDetails.fullName || 'Valued Client',
       email: bookingDetails.email || 'client@tumblespin.com',
       phone: bookingDetails.phone || '',
-      address: bookingDetails.address || '',
-      pickupDate: bookingDetails.pickupDate || '',
-      pickupTimeSlot: bookingDetails.pickupTimeSlot || '',
-      deliveryDate: bookingDetails.deliveryDate || '',
-      deliveryTimeSlot: bookingDetails.deliveryTimeSlot || '',
+      address: bookingType === 'instore' ? 'In-Store Drop-off (Store Counter)' : (bookingDetails.address || ''),
+      pickupDate: bookingType === 'instore' ? new Date().toISOString().split('T')[0] : (bookingDetails.pickupDate || ''),
+      pickupTimeSlot: bookingType === 'instore' ? 'Store Drop-off' : (bookingDetails.pickupTimeSlot || ''),
+      deliveryDate: bookingType === 'instore' ? new Date().toISOString().split('T')[0] : (bookingDetails.deliveryDate || ''),
+      deliveryTimeSlot: bookingType === 'instore' ? 'Store Pickup' : (bookingDetails.deliveryTimeSlot || ''),
       garmentCareOption: bookingDetails.garmentCareOption || 'standard',
       specialInstructions: bookingDetails.specialInstructions || '',
       selectedServices,
-      subServices: getSelectedItemsWithDetails().map(item => ({
+      subServices: selectedItems.length > 0 ? selectedItems.map(item => ({
         id: item.id,
         name: item.name,
         category: item.category,
         price: adjustPrice(item.price),
         quantity: item.quantity,
         serviceType: item.serviceType
-      })),
+      })) : [
+        {
+          id: 'instore-counter-service',
+          name: selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ') || 'Walk-in Garment Care',
+          category: 'laundry',
+          price: getGrandTotal(),
+          quantity: 1,
+          serviceType: 'In-Store Counter Service'
+        }
+      ],
       totalPrice: getGrandTotal(),
-      paymentMethod: paymentMode === 'cod' ? 'UPI / Dynamic QR' : 'Online Payment (Disabled)',
+      paymentMethod: bookingType === 'instore' ? 'UPI / Dynamic QR' : (paymentMode === 'cod' ? 'UPI / Dynamic QR' : 'Online Payment (Disabled)'),
       dynamicPricing: dynamicPricing && dynamicPricing.mode !== 'none' ? {
         mode: dynamicPricing.mode,
         percentage: dynamicPricing.percentage,
@@ -1625,10 +1809,10 @@ export default function BookingModal({
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white font-serif">
-                    {showQrPayment ? 'Secure Gateway Checkout' : isWhatsAppMode ? 'Instant WhatsApp Booking' : 'Book Tumble Spin Care'}
+                    {showQrPayment ? 'Secure Gateway Checkout' : isWhatsAppMode ? 'Instant WhatsApp Booking' : bookingType === 'instore' ? 'In-Store Drop-off & Booking' : 'Book Tumble Spin Care'}
                   </h3>
                   <p className="text-[10px] uppercase font-mono tracking-widest text-slate-400 font-bold">
-                    {showQrPayment ? '🔒 PCI-DSS Compliant Gateway' : isWhatsAppMode ? '⚡ FAST DOORSTEP PICKUP' : `Step ${step} of 5`}
+                    {showQrPayment ? '🔒 PCI-DSS Compliant Gateway' : isWhatsAppMode ? '⚡ FAST DOORSTEP PICKUP' : bookingType === 'instore' ? `In-Store Step ${step} of 3` : `Step ${step} of 5`}
                   </p>
                 </div>
               </div>
@@ -1644,38 +1828,77 @@ export default function BookingModal({
             {/* Step Progress Indicators */}
             {!isSuccess && !showQrPayment && (
               <div className="px-6 py-3 bg-slate-100/50 dark:bg-brand-deep/10 border-b border-slate-100 dark:border-brand-teal/5 flex gap-1.5 justify-between shrink-0">
-                {[1, 2, 3, 4, 5].map((s, sIdx) => {
-                  const isClickable = s <= step || hasReachedReview;
-                  return (
-                    <button
-                      key={`modal-step-bar-${s}-${sIdx}`}
-                      type="button"
-                      disabled={!isClickable}
-                      onClick={() => {
-                        if (isClickable) {
-                          setStep(s);
-                        }
-                      }}
-                      className={`flex-1 flex flex-col gap-1 text-left transition-all ${
-                        isClickable 
-                          ? 'cursor-pointer hover:opacity-80' 
-                          : 'cursor-not-allowed opacity-50'
-                      }`}
-                      title={isClickable ? `Jump to Step ${s}: ${s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}` : `Step ${s}`}
-                    >
-                      <div className={`h-1.5 rounded-full transition-colors ${
-                        step >= s 
-                          ? 'bg-brand-primary dark:bg-brand-accent' 
-                          : 'bg-slate-200 dark:bg-slate-800'
-                      }`} />
-                      <span className={`text-[9px] uppercase tracking-wider text-center font-mono ${
-                        step === s ? 'font-bold text-brand-primary dark:text-brand-accent' : 'text-slate-400'
-                      }`}>
-                        {s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}
-                      </span>
-                    </button>
-                  );
-                })}
+                {bookingType === 'instore' ? (
+                  [
+                    { s: 1, label: 'Services & Items' },
+                    { s: 2, label: 'Customer Details' },
+                    { s: 3, label: 'Billing & QR' }
+                  ].map((item) => {
+                    const isClickable = item.s <= step;
+                    return (
+                      <button
+                        key={`modal-step-bar-instore-${item.s}`}
+                        type="button"
+                        disabled={!isClickable}
+                        onClick={() => {
+                          if (isClickable) {
+                            setStep(item.s);
+                          }
+                        }}
+                        className={`flex-1 flex flex-col gap-1 text-left transition-all ${
+                          isClickable 
+                            ? 'cursor-pointer hover:opacity-80' 
+                            : 'cursor-not-allowed opacity-50'
+                        }`}
+                        title={`Step ${item.s}: ${item.label}`}
+                      >
+                        <div className={`h-1.5 rounded-full transition-colors ${
+                          step >= item.s 
+                            ? 'bg-teal-600 dark:bg-teal-400' 
+                            : 'bg-slate-200 dark:bg-slate-800'
+                        }`} />
+                        <span className={`text-[9px] uppercase tracking-wider text-center font-mono ${
+                          step === item.s ? 'font-bold text-teal-700 dark:text-teal-300' : 'text-slate-400'
+                        }`}>
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  [1, 2, 3, 4, 5].map((s, sIdx) => {
+                    const isClickable = s <= step || hasReachedReview;
+                    return (
+                      <button
+                        key={`modal-step-bar-${s}-${sIdx}`}
+                        type="button"
+                        disabled={!isClickable}
+                        onClick={() => {
+                          if (isClickable) {
+                            setStep(s);
+                          }
+                        }}
+                        className={`flex-1 flex flex-col gap-1 text-left transition-all ${
+                          isClickable 
+                            ? 'cursor-pointer hover:opacity-80' 
+                            : 'cursor-not-allowed opacity-50'
+                        }`}
+                        title={isClickable ? `Jump to Step ${s}: ${s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}` : `Step ${s}`}
+                      >
+                        <div className={`h-1.5 rounded-full transition-colors ${
+                          step >= s 
+                            ? 'bg-brand-primary dark:bg-brand-accent' 
+                            : 'bg-slate-200 dark:bg-slate-800'
+                        }`} />
+                        <span className={`text-[9px] uppercase tracking-wider text-center font-mono ${
+                          step === s ? 'font-bold text-brand-primary dark:text-brand-accent' : 'text-slate-400'
+                        }`}>
+                          {s === 1 ? 'Care' : s === 2 ? 'Slots' : s === 3 ? 'Items' : s === 4 ? 'User' : 'Review'}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             )}
 
@@ -1766,13 +1989,15 @@ export default function BookingModal({
 
                   <div className="space-y-2">
                     <h4 className="text-xl font-serif font-semibold text-slate-900 dark:text-white">
-                      Reservation Secured Successfully!
+                      {bookingType === 'instore' ? 'In-Store Drop-off Confirmed!' : 'Reservation Secured Successfully!'}
                     </h4>
-                    <p className="text-xs font-mono font-bold text-brand-primary dark:text-brand-accent">
+                    <p className="text-xs font-mono font-bold text-teal-600 dark:text-teal-400">
                       ORDER ID: {generatedOrderId}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                      Your premium garment care slot is successfully booked. Your PDF digital invoice has been automatically generated and downloaded.
+                      {bookingType === 'instore'
+                        ? 'Your in-store counter drop-off order is logged with current date and payment receipt. Your digital invoice has been automatically generated and downloaded.'
+                        : 'Your premium garment care slot is successfully booked. Your PDF digital invoice has been automatically generated and downloaded.'}
                     </p>
                   </div>
 
@@ -2337,6 +2562,7 @@ export default function BookingModal({
                         <button
                           type="button"
                           onClick={() => {
+                            setBookingType('doorstep');
                             setSelectedServices(['hassle-free']);
                             setStep(2); // Jump straight to slots
                           }}
@@ -2344,6 +2570,55 @@ export default function BookingModal({
                         >
                           ⚡ Hassle-Free Pickup
                         </button>
+                      </div>
+
+                      {/* In-Store Drop-off Option Card (Below Hassle-Free) */}
+                      <div className={`mb-5 p-4 rounded-2xl border transition-all duration-300 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                        bookingType === 'instore'
+                          ? 'bg-teal-500/10 border-teal-500/30 dark:bg-teal-950/40 dark:border-teal-400/30'
+                          : 'bg-linear-to-r from-slate-50 via-teal-50/20 to-slate-50 border-slate-200 dark:border-slate-800 dark:from-slate-900/40 dark:to-slate-900/20'
+                      }`}>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="p-1 rounded-lg bg-teal-600/10 text-teal-700 dark:bg-teal-400/20 dark:text-teal-300">
+                              <Store className="h-4 w-4" />
+                            </span>
+                            <h5 className="text-xs font-extrabold uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                              In-Store Counter Drop-off Option
+                            </h5>
+                            {bookingType === 'instore' && (
+                              <span className="px-2 py-0.5 rounded-full bg-teal-600 text-white text-[9px] font-black uppercase tracking-wider">
+                                Active Mode
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed font-semibold">
+                            Visiting our physical laundromat counter? Book with current date, no time slots, identical store catalog pricing, and direct QR code payment.
+                          </p>
+                        </div>
+                        {bookingType === 'instore' ? (
+                          <button
+                            type="button"
+                            onClick={() => setBookingType('doorstep')}
+                            className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-xl transition-all duration-300 shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            Switch to Doorstep
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBookingType('instore');
+                              if (selectedServices.length === 0) {
+                                setSelectedServices(['wash-fold']);
+                              }
+                            }}
+                            className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-white bg-teal-700 hover:bg-teal-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 rounded-xl transition-all duration-300 shadow-md shrink-0 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Store className="h-4 w-4" />
+                            Select In-Store
+                          </button>
+                        )}
                       </div>
 
                       <div className="mb-4">
@@ -2391,6 +2666,174 @@ export default function BookingModal({
                         })}
                       </div>
 
+                      {/* IN-STORE ITEMIZER (WHEN INSTORE ACTIVE) */}
+                      {bookingType === 'instore' && (
+                        <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <h5 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                <ShoppingBag className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                                Add Garments & Laundry (Identical Store Catalog Prices)
+                              </h5>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Exact same prices as normal booking. Adjust weights or increment item quantities.
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Live In-Store Total</span>
+                              <div className="text-base font-black font-mono text-teal-600 dark:text-teal-400">
+                                ₹{getGrandTotal()}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* KG Slider / Quick buttons if laundry selected or category is laundry */}
+                          {(selectedServices.includes('wash-fold') || selectedServices.includes('wash-iron') || activeSubCategory === 'laundry') && (
+                            <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/30 space-y-3">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                                  <Shirt className="h-3.5 w-3.5" /> Wash & Fold Laundry Weight:
+                                </span>
+                                <span className="font-mono font-bold text-sm text-teal-700 dark:text-teal-300">
+                                  {quantities['wash-fold-kg'] || 0} KG
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity('wash-fold-kg', -1)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                >
+                                  -1 KG
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity('wash-fold-kg', -0.1)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                >
+                                  -0.1 KG
+                                </button>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="30"
+                                  step="0.1"
+                                  value={quantities['wash-fold-kg'] || 0}
+                                  onChange={(e) => setQuantities(prev => ({ ...prev, 'wash-fold-kg': parseFloat(e.target.value) || 0 }))}
+                                  className="flex-1 accent-teal-600"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity('wash-fold-kg', 0.1)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                >
+                                  +0.1 KG
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity('wash-fold-kg', 1)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                >
+                                  +1 KG
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {[1, 2, 3, 5, 8, 10].map(kg => (
+                                  <button
+                                    key={`instore-kg-btn-${kg}`}
+                                    type="button"
+                                    onClick={() => setQuantities(prev => ({ ...prev, 'wash-fold-kg': kg }))}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold font-mono transition-colors cursor-pointer ${
+                                      quantities['wash-fold-kg'] === kg
+                                        ? 'bg-teal-600 text-white'
+                                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    {kg} KG
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Subcategory Pills */}
+                          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                            {[
+                              { id: 'laundry', label: 'Wash / KG' },
+                              { id: 'men', label: "Men's Wear" },
+                              { id: 'women', label: "Women's Wear" },
+                              { id: 'woolens', label: 'Woolens & Jackets' },
+                              { id: 'household', label: 'Household' },
+                              { id: 'shoes', label: 'Shoes & Spa' }
+                            ].map((tab) => (
+                              <button
+                                key={`instore-tab-${tab.id}`}
+                                type="button"
+                                onClick={() => setActiveSubCategory(tab.id as any)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                                  activeSubCategory === tab.id
+                                    ? 'bg-teal-600 text-white shadow-xs'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                }`}
+                              >
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Garment Cards */}
+                          <div className="grid gap-2 sm:grid-cols-2 max-h-[260px] overflow-y-auto pr-1">
+                            {effectiveSubServices
+                              .filter(item => item.category === activeSubCategory)
+                              .map((item, idx) => {
+                                const qty = quantities[item.id] || 0;
+                                return (
+                                  <div
+                                    key={`instore-item-${item.id}-${idx}`}
+                                    className={`p-2.5 rounded-xl border flex items-center justify-between transition-all ${
+                                      qty > 0
+                                        ? 'border-teal-500 bg-teal-50/30 dark:bg-teal-950/20'
+                                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 flex-1 min-w-0 pr-2">
+                                      <span className="text-base">{getItemIcon(item.id, item.category)}</span>
+                                      <div className="truncate">
+                                        <div className="text-xs font-bold text-slate-800 dark:text-white truncate">
+                                          {item.name}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 font-mono">
+                                          ₹{adjustPrice(item.price)} • {item.serviceType}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateQuantity(item.id, -1)}
+                                        disabled={qty <= 0}
+                                        className="h-6 w-6 rounded-md bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                                      >
+                                        <Minus className="h-3 w-3" />
+                                      </button>
+                                      <span className="w-6 text-center text-xs font-bold font-mono">
+                                        {qty}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateQuantity(item.id, 1)}
+                                        className="h-6 w-6 rounded-md bg-teal-600 text-white flex items-center justify-center hover:bg-teal-700 cursor-pointer"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="mt-6 flex items-center justify-between gap-4 rounded-xl bg-brand-light p-4 dark:bg-brand-teal/10">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/10 dark:text-brand-accent">
@@ -2409,8 +2852,148 @@ export default function BookingModal({
                     </motion.div>
                   )}
 
-                  {/* STEP 2: SCHEDULING */}
-                  {step === 2 && (
+                  {/* STEP 2: IN-STORE CUSTOMER DETAILS */}
+                  {step === 2 && bookingType === 'instore' && (
+                    <motion.div
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="space-y-5"
+                    >
+                      <div className="p-4 rounded-2xl bg-teal-50/80 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                        <div className="flex items-center gap-3">
+                          <span className="p-2 rounded-xl bg-teal-600 text-white dark:bg-teal-400 dark:text-slate-950 shrink-0">
+                            <Store className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <h5 className="text-xs font-black uppercase tracking-wider text-teal-900 dark:text-teal-200">
+                              In-Store Counter Customer Details
+                            </h5>
+                            <p className="text-[11px] text-teal-700/80 dark:text-teal-300/80 font-medium">
+                              Drop-off Date: <span className="font-bold underline">{todayFormatted}</span> (Current Date) • No time slots needed
+                            </p>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-teal-600/10 text-teal-700 dark:bg-teal-400/20 dark:text-teal-300 text-[10px] font-extrabold uppercase tracking-wider">
+                          Instant Counter Handover
+                        </span>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {/* Customer Full Name */}
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                            Customer Full Name <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={bookingDetails.fullName || ''}
+                            onChange={(e) => {
+                              setBookingDetails(prev => ({ ...prev, fullName: e.target.value }));
+                              if (formErrors.fullName) setFormErrors(prev => ({ ...prev, fullName: '' }));
+                            }}
+                            placeholder="e.g., Rajesh Kumar"
+                            className={`w-full px-4 py-2.5 rounded-xl border text-xs text-slate-800 dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all ${
+                              formErrors.fullName ? 'border-rose-500' : 'border-slate-200 dark:border-slate-800'
+                            }`}
+                          />
+                          {formErrors.fullName && <p className="text-[11px] text-rose-500 font-medium">{formErrors.fullName}</p>}
+                        </div>
+
+                        {/* Mobile Number */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                            Mobile / WhatsApp Number <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                              +91
+                            </span>
+                            <input
+                              type="tel"
+                              value={bookingDetails.phone || ''}
+                              onChange={(e) => {
+                                setBookingDetails(prev => ({ ...prev, phone: e.target.value }));
+                                if (formErrors.phone) setFormErrors(prev => ({ ...prev, phone: '' }));
+                              }}
+                              placeholder="9876543210"
+                              className={`w-full pl-12 pr-4 py-2.5 rounded-xl border text-xs text-slate-800 dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all ${
+                                formErrors.phone ? 'border-rose-500' : 'border-slate-200 dark:border-slate-800'
+                              }`}
+                            />
+                          </div>
+                          {formErrors.phone && <p className="text-[11px] text-rose-500 font-medium">{formErrors.phone}</p>}
+                        </div>
+
+                        {/* Email Address */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Mail className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                            Email Address <span className="text-slate-400 font-normal">(for PDF receipt)</span>
+                          </label>
+                          <input
+                            type="email"
+                            value={bookingDetails.email || ''}
+                            onChange={(e) => {
+                              setBookingDetails(prev => ({ ...prev, email: e.target.value }));
+                              if (formErrors.email) setFormErrors(prev => ({ ...prev, email: '' }));
+                            }}
+                            placeholder="customer@example.com"
+                            className={`w-full px-4 py-2.5 rounded-xl border text-xs text-slate-800 dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all ${
+                              formErrors.email ? 'border-rose-500' : 'border-slate-200 dark:border-slate-800'
+                            }`}
+                          />
+                          {formErrors.email && <p className="text-[11px] text-rose-500 font-medium">{formErrors.email}</p>}
+                        </div>
+
+                        {/* Fabric Wash & Care Preference */}
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                            Fabric Wash & Care Preference
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            {[
+                              { id: 'standard', title: 'Standard Care', desc: 'Gentle pH-neutral formulation' },
+                              { id: 'eco', title: 'Eco Organic', desc: 'Plant-based certified enzymes' },
+                              { id: 'hypoallergenic', title: 'Sensitive Skin', desc: 'Fragrance-free hypoallergenic wash' }
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setBookingDetails(prev => ({ ...prev, garmentCareOption: opt.id }))}
+                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                                  bookingDetails.garmentCareOption === opt.id
+                                    ? 'border-teal-600 bg-teal-50/50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-200 font-bold ring-1 ring-teal-500'
+                                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
+                                <div className="text-xs font-bold">{opt.title}</div>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Special Instructions */}
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                            Special Instructions / Garment Remarks (Optional)
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={bookingDetails.specialInstructions || ''}
+                            onChange={(e) => setBookingDetails(prev => ({ ...prev, specialInstructions: e.target.value }))}
+                            placeholder="e.g., Stain on white shirt collar, fold neatly, express counter pickup requested..."
+                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all resize-none"
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* STEP 2: DOORSTEP SCHEDULING */}
+                  {step === 2 && bookingType === 'doorstep' && (
                     <motion.div
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -2593,8 +3176,156 @@ export default function BookingModal({
                     </motion.div>
                   )}
 
-                  {/* STEP 3: SUB-SERVICES & GARMENTS SELECT (NEW STEP!) */}
-                  {step === 3 && (
+                  {/* STEP 3: IN-STORE BILLING & PAYMENT VIA QR */}
+                  {step === 3 && bookingType === 'instore' && (
+                    <motion.div
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="space-y-6"
+                    >
+                      <div className="text-center space-y-1">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-600/10 text-teal-700 dark:bg-teal-400/10 dark:text-teal-300">
+                          🧾 In-Store Counter Billing & QR Payment
+                        </span>
+                        <h4 className="text-lg font-serif font-bold text-slate-900 dark:text-white pt-1">
+                          Review Bill & Settle via Dynamic UPI QR
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                          Current Date: <span className="font-bold text-slate-700 dark:text-slate-300">{todayFormatted}</span>. Scan the UPI QR code using any app or settle at counter.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                        {/* Left Column: Itemized Bill */}
+                        <div className="lg:col-span-7 space-y-4">
+                          <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 shadow-xs space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                              <div>
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Customer Details</span>
+                                <h5 className="text-xs font-bold text-slate-800 dark:text-white">{bookingDetails.fullName || 'In-Store Walk-in'}</h5>
+                                <p className="text-[11px] text-slate-500 font-mono">+91 {bookingDetails.phone}</p>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Drop-off Date</span>
+                                <div className="text-xs font-bold text-teal-700 dark:text-teal-300">{todayFormatted}</div>
+                                <span className="text-[10px] text-slate-400 font-medium">In-Store Counter</span>
+                              </div>
+                            </div>
+
+                            {/* Itemized Garments */}
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                                Selected Garments & Services (Same Catalog Rates)
+                              </div>
+                              <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[220px] overflow-y-auto pr-1">
+                                {getSelectedItemsWithDetails().length > 0 ? (
+                                  getSelectedItemsWithDetails().map((item, idx) => (
+                                    <div key={`instore-bill-item-${item.id}-${idx}`} className="py-2 flex items-center justify-between text-xs">
+                                      <div className="flex-1 pr-2">
+                                        <div className="font-semibold text-slate-800 dark:text-white flex items-center gap-1.5">
+                                          <span>{getItemIcon(item.id, item.category)}</span>
+                                          <span>{item.name}</span>
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">{item.serviceType}</div>
+                                      </div>
+                                      <div className="text-right">
+                                        <span className="font-mono text-slate-500 text-[11px]">
+                                          {item.quantity} × ₹{adjustPrice(item.price)}
+                                        </span>
+                                        <div className="font-bold font-mono text-slate-800 dark:text-white">
+                                          ₹{item.quantity * adjustPrice(item.price)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="py-2 flex items-center justify-between text-xs">
+                                    <div>
+                                      <div className="font-semibold text-slate-800 dark:text-white">
+                                        {selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ') || 'Walk-in Garment Care'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">In-Store Counter Service</div>
+                                    </div>
+                                    <div className="font-bold font-mono text-slate-800 dark:text-white">
+                                      ₹{getGrandTotal()}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Price Summary */}
+                            <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-1.5 text-xs">
+                              <div className="flex justify-between text-slate-500">
+                                <span>Catalog Subtotal</span>
+                                <span className="font-mono">₹{getRawBaseTotal()}</span>
+                              </div>
+                              {dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0 && (
+                                <div className={`flex justify-between ${dynamicPricing.mode === 'discount' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  <span>{dynamicPricing.label || (dynamicPricing.mode === 'discount' ? 'Promo Discount' : 'Dynamic Adjustment')}</span>
+                                  <span className="font-mono">
+                                    {dynamicPricing.mode === 'discount' ? '-' : '+'}₹{Math.abs(getDynamicPricingAdjustment())}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="border-t border-slate-200 dark:border-slate-700 pt-2 flex justify-between items-center text-sm font-extrabold text-slate-900 dark:text-white">
+                                <span>Grand Total Payable</span>
+                                <span className="font-mono text-lg text-teal-600 dark:text-teal-400">₹{getGrandTotal()}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Column: Dynamic UPI QR Code */}
+                        <div className="lg:col-span-5 flex flex-col items-center">
+                          <div className="p-5 bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800/40 rounded-3xl shadow-lg flex flex-col items-center space-y-3 w-full max-w-[300px] mx-auto text-center">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-teal-700 dark:text-teal-300">
+                              <QrCode className="h-4 w-4" />
+                              Scan to Pay via Any UPI App
+                            </div>
+
+                            {/* Dynamic UPI QR Code */}
+                            <div className="relative p-3 bg-white rounded-2xl border border-slate-100 shadow-xs flex items-center justify-center">
+                              <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${getGrandTotal()}&cu=INR&tn=TS_INSTORE&tr=TS_INSTORE`)}`}
+                                alt="In-Store UPI QR Code"
+                                className="w-44 h-44 object-contain rounded-lg"
+                                loading="lazy"
+                              />
+                            </div>
+
+                            <div className="space-y-1 w-full">
+                              <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+                                ₹{getGrandTotal()}
+                              </div>
+                              <div className="flex items-center justify-center gap-2 text-[11px] text-slate-500 font-mono">
+                                <span>UPI: prakashcsat@oksbi</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText('prakashcsat@oksbi');
+                                    alert('UPI ID copied to clipboard: prakashcsat@oksbi');
+                                  }}
+                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-teal-600 transition-colors cursor-pointer"
+                                  title="Copy UPI ID"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 w-full text-[10px] text-slate-400 space-y-1 font-medium">
+                              <div>Accepts Google Pay, PhonePe, Paytm, BHIM</div>
+                              <div className="text-emerald-600 dark:text-emerald-400 font-bold">✓ Zero Transaction Surcharge</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* STEP 3: SUB-SERVICES & GARMENTS SELECT (DOORSTEP) */}
+                  {step === 3 && bookingType === 'doorstep' && (
                     <motion.div
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -2858,7 +3589,7 @@ export default function BookingModal({
                   )}
 
                   {/* STEP 4: DETAILS & PREFERENCES */}
-                  {step === 4 && (
+                  {step === 4 && bookingType === 'doorstep' && (
                     <motion.div
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -3067,7 +3798,7 @@ export default function BookingModal({
                   )}
 
                   {/* STEP 5: CONFIRM AND SUBMIT */}
-                  {step === 5 && (
+                  {step === 5 && bookingType === 'doorstep' && (
                     <motion.div
                       initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -3563,58 +4294,92 @@ export default function BookingModal({
                       <button
                         type="button"
                         onClick={handlePrevStep}
-                        className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-brand-dark dark:text-slate-300 dark:hover:bg-slate-900"
+                        className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-brand-dark dark:text-slate-300 dark:hover:bg-slate-900 cursor-pointer"
                         id="prev-step-btn"
                       >
                         <ChevronLeft className="h-4 w-4" />
-                        Back
+                        {bookingType === 'instore' && step === 2 ? 'Back to Services' : bookingType === 'instore' && step === 3 ? 'Back to Details' : 'Back'}
                       </button>
                     ) : (
                       <div />
                     )}
 
-                    {step < 5 ? (
-                      <div className="flex items-center gap-2">
-                        {hasReachedReview && (
-                          <button
-                            type="button"
-                            onClick={() => setStep(5)}
-                            className="flex items-center gap-1.5 rounded-full border border-brand-primary/40 bg-brand-primary/10 px-4 py-2.5 text-xs font-bold text-brand-primary hover:bg-brand-primary/20 dark:border-brand-accent/40 dark:bg-brand-accent/15 dark:text-brand-accent cursor-pointer transition-all shadow-xs"
-                            id="return-to-review-btn"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            Return to Review (Step 5)
-                          </button>
-                        )}
+                    {bookingType === 'instore' ? (
+                      step < 3 ? (
                         <button
                           type="button"
                           onClick={handleNextStep}
-                          className="flex items-center gap-1.5 rounded-full bg-brand-primary px-6 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-brand-deep dark:bg-brand-accent dark:text-brand-deep cursor-pointer"
-                          id="next-step-btn"
+                          className="flex items-center gap-1.5 rounded-full bg-teal-600 px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-teal-700 dark:bg-teal-400 dark:text-slate-950 dark:hover:bg-teal-300 cursor-pointer"
+                          id="instore-next-step-btn"
                         >
-                          Continue
+                          {step === 1 ? 'Continue to Customer Details' : 'Continue to Billing & QR'}
                           <ChevronRight className="h-4 w-4" />
                         </button>
-                      </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleInstoreOrderSubmit()}
+                          disabled={isSubmitting}
+                          className="flex items-center gap-2 rounded-full bg-linear-to-r from-teal-600 to-emerald-600 px-8 py-2.5 text-xs font-bold text-white shadow-md hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                          id="confirm-instore-booking-btn"
+                        >
+                          {isSubmitting ? (
+                            <span className="flex items-center gap-2">
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                              Generating In-Store Order & Receipt...
+                            </span>
+                          ) : (
+                            <>
+                              <span>✓ Confirm In-Store Booking & Receipt</span>
+                              <Sparkles className="h-4 w-4" />
+                            </>
+                          )}
+                        </button>
+                      )
                     ) : (
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="flex items-center gap-1.5 rounded-full bg-linear-to-r from-brand-primary to-brand-secondary px-8 py-2.5 text-xs font-semibold text-white shadow-md hover:opacity-95 disabled:opacity-50 cursor-pointer"
-                        id="confirm-booking-btn"
-                      >
-                        {isSubmitting ? (
-                          <span className="flex items-center gap-2">
-                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                            Securing Valet...
-                          </span>
-                        ) : (
-                          <>
-                            {selectedServices.includes('hassle-free') ? '⚡ Confirm Hassle-Free Pickup (₹0 Today)' : 'Confirm & Schedule Pickup'}
-                            <Sparkles className="h-4 w-4" />
-                          </>
-                        )}
-                      </button>
+                      step < 5 ? (
+                        <div className="flex items-center gap-2">
+                          {hasReachedReview && (
+                            <button
+                              type="button"
+                              onClick={() => setStep(5)}
+                              className="flex items-center gap-1.5 rounded-full border border-brand-primary/40 bg-brand-primary/10 px-4 py-2.5 text-xs font-bold text-brand-primary hover:bg-brand-primary/20 dark:border-brand-accent/40 dark:bg-brand-accent/15 dark:text-brand-accent cursor-pointer transition-all shadow-xs"
+                              id="return-to-review-btn"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              Return to Review (Step 5)
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleNextStep}
+                            className="flex items-center gap-1.5 rounded-full bg-brand-primary px-6 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-brand-deep dark:bg-brand-accent dark:text-brand-deep cursor-pointer"
+                            id="next-step-btn"
+                          >
+                            Continue
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
+                          className="flex items-center gap-1.5 rounded-full bg-linear-to-r from-brand-primary to-brand-secondary px-8 py-2.5 text-xs font-semibold text-white shadow-md hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                          id="confirm-booking-btn"
+                        >
+                          {isSubmitting ? (
+                            <span className="flex items-center gap-2">
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                              Securing Valet...
+                            </span>
+                          ) : (
+                            <>
+                              {selectedServices.includes('hassle-free') ? '⚡ Confirm Hassle-Free Pickup (₹0 Today)' : 'Confirm & Schedule Pickup'}
+                              <Sparkles className="h-4 w-4" />
+                            </>
+                          )}
+                        </button>
+                      )
                     )}
                   </div>
                 </form>
