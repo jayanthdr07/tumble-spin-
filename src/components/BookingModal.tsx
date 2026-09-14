@@ -790,11 +790,11 @@ export default function BookingModal({
     return Object.keys(errors).length === 0;
   };
 
-  // Adjust garment subservice quantities (supports both whole counts and decimal fractions like 0.1, 0.5, 1.2 kg)
+  // Adjust garment subservice quantities (supports both whole counts and decimal fractions like 0.1, 0.5, 1.25 kg)
   const updateQuantity = (id: string, amount: number) => {
     setQuantities(prev => {
       const cur = prev[id] || 0;
-      const next = Math.max(0, Math.round((cur + amount) * 10) / 10);
+      const next = Math.max(0, Math.round((cur + amount) * 100) / 100);
       return { ...prev, [id]: next };
     });
   };
@@ -802,7 +802,7 @@ export default function BookingModal({
   const setDirectQuantity = (id: string, value: number) => {
     setQuantities(prev => ({
       ...prev,
-      [id]: Math.max(0, Math.round(value * 10) / 10)
+      [id]: Math.max(0, Math.round(value * 100) / 100)
     }));
   };
 
@@ -2796,99 +2796,141 @@ export default function BookingModal({
                           </div>
 
                           {/* Garment Cards */}
-                          <div className="grid gap-2 sm:grid-cols-2 max-h-[260px] overflow-y-auto pr-1">
+                          <div className="grid gap-2.5 sm:grid-cols-2 max-h-[290px] overflow-y-auto pr-1">
                             {effectiveSubServices
                               .filter(item => item.category === activeSubCategory)
                               .map((item, idx) => {
                                 const qty = quantities[item.id] || 0;
+                                const isLaundryKg = item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg');
                                 return (
                                   <div
                                     key={`instore-item-${item.id}-${idx}`}
-                                    className={`p-2.5 rounded-xl border flex items-center justify-between transition-all ${
+                                    className={`p-3 rounded-2xl border transition-all ${
                                       qty > 0
-                                        ? 'border-teal-500 bg-teal-50/30 dark:bg-teal-950/20'
+                                        ? 'border-teal-500 bg-teal-50/40 dark:bg-teal-950/30 shadow-2xs'
                                         : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                                     }`}
                                   >
-                                    <div className="flex items-center gap-2 flex-1 min-w-0 pr-2">
-                                      <span className="text-base">{getItemIcon(item.id, item.category)}</span>
-                                      <div className="truncate">
-                                        <div className="text-xs font-bold text-slate-800 dark:text-white truncate">
-                                          {item.name}
+                                    {/* Top line: Garment Info & Primary Stepper */}
+                                    <div className="flex items-center justify-between gap-2 w-full">
+                                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                        <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0">
+                                          {getItemIcon(item.id, item.category)}
                                         </div>
-                                        <div className="text-[10px] text-slate-400 font-mono">
-                                          ₹{adjustPrice(item.price)} • {item.serviceType}
+                                        <div className="truncate min-w-0">
+                                          <div className="text-xs font-bold text-slate-800 dark:text-white truncate">
+                                            {item.name}
+                                          </div>
+                                          <div className="text-[10px] text-slate-400 font-mono">
+                                            ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''} • {item.serviceType}
+                                          </div>
                                         </div>
                                       </div>
+
+                                      {/* Primary Stepper Widget */}
+                                      {isLaundryKg ? (
+                                        <div className="inline-flex items-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 rounded-xl p-0.5 shrink-0 whitespace-nowrap shadow-2xs">
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, -1)}
+                                            disabled={qty <= 0}
+                                            className="h-7 w-7 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-25 transition-all cursor-pointer"
+                                            title="Subtract 1 KG"
+                                          >
+                                            <Minus className="h-3 w-3" />
+                                          </button>
+
+                                          <div className="flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-lg px-2 h-7 mx-1 whitespace-nowrap">
+                                            <input
+                                              type="number"
+                                              step="0.1"
+                                              min="0"
+                                              value={qty === 0 ? '' : qty}
+                                              placeholder="0"
+                                              onChange={(e) => {
+                                                const val = parseFloat(e.target.value);
+                                                setDirectQuantity(item.id, isNaN(val) ? 0 : val);
+                                              }}
+                                              className="w-10 text-center text-xs font-black font-mono text-teal-700 dark:text-teal-300 bg-transparent focus:outline-hidden"
+                                            />
+                                            <span className="text-[9px] font-black font-mono text-slate-400 dark:text-slate-500 select-none ml-0.5">KG</span>
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, 1)}
+                                            className="h-7 w-7 rounded-lg flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white transition-all shadow-xs cursor-pointer"
+                                            title="Add 1 KG"
+                                          >
+                                            <Plus className="h-3 w-3" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, -1)}
+                                            disabled={qty <= 0}
+                                            className="h-7 w-7 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                                          >
+                                            <Minus className="h-3 w-3" />
+                                          </button>
+                                          <span className="w-6 text-center text-xs font-bold font-mono text-slate-800 dark:text-white">
+                                            {qty}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, 1)}
+                                            className="h-7 w-7 rounded-lg bg-teal-600 text-white flex items-center justify-center hover:bg-teal-700 transition-colors cursor-pointer shadow-xs"
+                                          >
+                                            <Plus className="h-3 w-3" />
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
-                                    {item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg') ? (
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, -0.5)}
-                                          disabled={qty <= 0}
-                                          className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
-                                          title="-0.5 KG"
-                                        >
-                                          -0.5
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, -0.1)}
-                                          disabled={qty <= 0}
-                                          className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
-                                          title="-0.1 KG"
-                                        >
-                                          -0.1
-                                        </button>
-                                        <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1">
-                                          <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0"
-                                            value={qty}
-                                            onChange={(e) => setDirectQuantity(item.id, parseFloat(e.target.value) || 0)}
-                                            className="w-10 text-center text-xs font-bold font-mono text-teal-700 dark:text-teal-300 bg-transparent focus:outline-hidden"
-                                          />
-                                          <span className="text-[8px] font-bold text-slate-400">KG</span>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, 0.1)}
-                                          className="px-1 py-0.5 rounded bg-teal-50 dark:bg-teal-950/40 text-[10px] font-bold text-teal-600 hover:bg-teal-100 cursor-pointer"
-                                          title="+0.1 KG"
-                                        >
-                                          +0.1
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, 0.5)}
-                                          className="px-1.5 py-0.5 rounded bg-teal-600 text-[10px] font-bold text-white hover:bg-teal-700 cursor-pointer"
-                                          title="+0.5 KG"
-                                        >
-                                          +0.5
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <div className="flex items-center gap-1.5 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, -1)}
-                                          disabled={qty <= 0}
-                                          className="h-6 w-6 rounded-md bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
-                                        >
-                                          <Minus className="h-3 w-3" />
-                                        </button>
-                                        <span className="w-6 text-center text-xs font-bold font-mono">
-                                          {qty}
+
+                                    {/* Clean Quick Fine-Tune Sub-Row for Laundry/KG items */}
+                                    {isLaundryKg && (
+                                      <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/70 flex items-center justify-between w-full">
+                                        <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                          Quick Adjust:
                                         </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => updateQuantity(item.id, 1)}
-                                          className="h-6 w-6 rounded-md bg-teal-600 text-white flex items-center justify-center hover:bg-teal-700 cursor-pointer"
-                                        >
-                                          <Plus className="h-3 w-3" />
-                                        </button>
+                                        <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, -0.5)}
+                                            disabled={qty <= 0}
+                                            className="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors"
+                                            title="Subtract 0.5 KG"
+                                          >
+                                            -0.5
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, -0.1)}
+                                            disabled={qty <= 0}
+                                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors"
+                                            title="Subtract 0.1 KG"
+                                          >
+                                            -0.1
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, 0.1)}
+                                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold font-mono bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200/50 dark:border-teal-800/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 cursor-pointer transition-colors"
+                                            title="Add 0.1 KG"
+                                          >
+                                            +0.1
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => updateQuantity(item.id, 0.5)}
+                                            className="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200/50 dark:border-teal-800/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 cursor-pointer transition-colors"
+                                            title="Add 0.5 KG"
+                                          >
+                                            +0.5
+                                          </button>
+                                        </div>
                                       </div>
                                     )}
                                   </div>
@@ -3580,95 +3622,135 @@ export default function BookingModal({
                       </div>
 
                       {/* Garment selection list */}
-                      <div className="grid gap-3 sm:grid-cols-2 max-h-[30vh] overflow-y-auto pr-1">
+                      <div className="grid gap-3 sm:grid-cols-2 max-h-[32vh] overflow-y-auto pr-1">
                         {effectiveSubServices.filter(item => item.category === activeSubCategory).map((item, idx) => {
                           const qty = quantities[item.id] || 0;
+                          const isLaundryKg = item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg');
                           return (
                             <div 
                               key={`modal-sub-${item.id}-${idx}`}
-                              className={`p-3 rounded-2xl border flex justify-between items-center transition-all ${
+                              className={`p-3 rounded-2xl border transition-all ${
                                 qty > 0 
-                                  ? 'border-brand-primary bg-brand-primary/[0.02] dark:border-brand-accent/50 dark:bg-brand-accent/[0.02]' 
+                                  ? 'border-brand-primary bg-brand-primary/[0.03] dark:border-brand-accent/50 dark:bg-brand-accent/[0.03] shadow-2xs' 
                                   : 'border-slate-100 bg-white dark:border-brand-teal/5 dark:bg-slate-900/30'
                               }`}
                             >
-                              <div className="flex items-center gap-2.5 max-w-[65%] min-w-0">
-                                <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100/50 dark:border-slate-800 text-brand-primary dark:text-brand-accent flex items-center justify-center shrink-0">
-                                  {getItemIcon(item.id || item.name, "h-4 w-4")}
+                              {/* Top line: Garment Info & Primary Stepper */}
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100/50 dark:border-slate-800 text-brand-primary dark:text-brand-accent flex items-center justify-center shrink-0">
+                                    {getItemIcon(item.id || item.name, "h-4 w-4")}
+                                  </div>
+                                  <div className="space-y-0.5 min-w-0">
+                                    <h5 className="text-xs font-bold text-slate-800 dark:text-white truncate">{item.name}</h5>
+                                    <p className="text-[10px] text-slate-400 font-mono">{item.serviceType} • ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''}</p>
+                                  </div>
                                 </div>
-                                <div className="space-y-0.5 min-w-0">
-                                  <h5 className="text-xs font-bold text-slate-800 dark:text-white truncate">{item.name}</h5>
-                                  <p className="text-[10px] text-slate-400 font-mono">{item.serviceType} • ₹{adjustPrice(item.price)}</p>
-                                </div>
+
+                                {/* Primary Stepper Widget */}
+                                {isLaundryKg ? (
+                                  <div className="inline-flex items-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 rounded-xl p-0.5 shrink-0 whitespace-nowrap shadow-2xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, -1)}
+                                      disabled={qty <= 0}
+                                      className="h-7 w-7 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-25 transition-all cursor-pointer"
+                                      title="Subtract 1 KG"
+                                    >
+                                      <Minus className="h-3 w-3" />
+                                    </button>
+
+                                    <div className="flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-lg px-2 h-7 mx-1 whitespace-nowrap">
+                                      <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        value={qty === 0 ? '' : qty}
+                                        placeholder="0"
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value);
+                                          setDirectQuantity(item.id, isNaN(val) ? 0 : val);
+                                        }}
+                                        className="w-10 text-center text-xs font-black font-mono text-brand-primary dark:text-brand-accent bg-transparent focus:outline-hidden"
+                                      />
+                                      <span className="text-[9px] font-black font-mono text-slate-400 dark:text-slate-500 select-none ml-0.5">KG</span>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, 1)}
+                                      className="h-7 w-7 rounded-lg flex items-center justify-center bg-brand-primary hover:bg-brand-deep text-white transition-all shadow-xs cursor-pointer"
+                                      title="Add 1 KG"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, -1)}
+                                      disabled={qty <= 0}
+                                      className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-30 cursor-pointer transition-colors"
+                                    >
+                                      <Minus className="h-3 w-3" />
+                                    </button>
+                                    <span className="text-xs font-bold font-mono text-slate-800 dark:text-white w-5 text-center">
+                                      {qty}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, 1)}
+                                      className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer transition-colors"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
-                              {item.category === 'laundry' || item.id.includes('kg') || item.name.toLowerCase().includes('kg') ? (
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, -0.5)}
-                                    disabled={qty <= 0}
-                                    className="px-1.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-50 cursor-pointer"
-                                    title="-0.5 KG"
-                                  >
-                                    -0.5
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, -0.1)}
-                                    disabled={qty <= 0}
-                                    className="px-1 py-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-50 cursor-pointer"
-                                    title="-0.1 KG"
-                                  >
-                                    -0.1
-                                  </button>
-                                  <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-0.5">
-                                    <input
-                                      type="number"
-                                      step="0.1"
-                                      min="0"
-                                      value={qty}
-                                      onChange={(e) => setDirectQuantity(item.id, parseFloat(e.target.value) || 0)}
-                                      className="w-11 text-center text-xs font-bold font-mono text-brand-primary dark:text-brand-accent bg-transparent focus:outline-hidden"
-                                    />
-                                    <span className="text-[9px] font-bold text-slate-400">KG</span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, 0.1)}
-                                    className="px-1 py-1 rounded-lg border border-brand-primary/20 bg-brand-primary/5 text-brand-primary dark:text-brand-accent text-[10px] font-bold hover:bg-brand-primary/10 cursor-pointer"
-                                    title="+0.1 KG"
-                                  >
-                                    +0.1
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, 0.5)}
-                                    className="px-1.5 py-1 rounded-lg bg-brand-primary text-white text-[10px] font-bold hover:bg-brand-deep cursor-pointer"
-                                    title="+0.5 KG"
-                                  >
-                                    +0.5
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, -1)}
-                                    className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
-                                  >
-                                    <Minus className="h-3 w-3" />
-                                  </button>
-                                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-white w-5 text-center">
-                                    {qty}
+                              {/* Clean Quick Fine-Tune Sub-Row for Laundry/KG items */}
+                              {isLaundryKg && (
+                                <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between w-full">
+                                  <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Quick Adjust:
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.id, 1)}
-                                    className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900"
-                                  >
-                                    <Plus className="h-3 w-3" />
-                                  </button>
+                                  <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, -0.5)}
+                                      disabled={qty <= 0}
+                                      className="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors"
+                                      title="Subtract 0.5 KG"
+                                    >
+                                      -0.5
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, -0.1)}
+                                      disabled={qty <= 0}
+                                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors"
+                                      title="Subtract 0.1 KG"
+                                    >
+                                      -0.1
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, 0.1)}
+                                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold font-mono bg-brand-primary/5 dark:bg-brand-accent/10 text-brand-primary dark:text-brand-accent border border-brand-primary/20 dark:border-brand-accent/30 hover:bg-brand-primary/10 cursor-pointer transition-colors"
+                                      title="Add 0.1 KG"
+                                    >
+                                      +0.1
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, 0.5)}
+                                      className="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-brand-primary/10 dark:bg-brand-accent/20 text-brand-primary dark:text-brand-accent border border-brand-primary/20 dark:border-brand-accent/30 hover:bg-brand-primary/15 cursor-pointer transition-colors"
+                                      title="Add 0.5 KG"
+                                    >
+                                      +0.5
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>

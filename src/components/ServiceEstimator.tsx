@@ -506,9 +506,9 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
                         {item.unit === 'kg' || item.unit?.includes('kg') || item.id.startsWith('laundry-') ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.id, item.serviceType, -0.5)}
@@ -525,7 +525,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                             >
                               -0.1
                             </button>
-                            <div className="flex items-center border border-slate-200/60 dark:border-brand-teal/20 rounded-md bg-white dark:bg-brand-deep/50 px-1 py-0.5">
+                            <div className="flex items-center border border-slate-200/60 dark:border-brand-teal/20 rounded-md bg-white dark:bg-brand-deep/50 px-1 py-0.5 shrink-0 whitespace-nowrap">
                               <input
                                 type="number"
                                 step="0.1"
