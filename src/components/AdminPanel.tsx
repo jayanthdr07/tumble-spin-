@@ -6,7 +6,8 @@ import {
   ChevronDown, MessageSquare, ShoppingBag, Plus, Trash2, ListOrdered, Bell,
   Search, Settings, Store, Receipt, Download, ShoppingCart, Info, Minus,
   Printer, Package, Users, TrendingUp, Sun, Moon,
-  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy, FileSpreadsheet
+  Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy, FileSpreadsheet,
+  Edit3
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
@@ -21,6 +22,7 @@ import { doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { ESTIMATOR_ITEMS } from './ServiceEstimator';
 import { SUB_SERVICES } from './BookingModal';
 import MasterPricingManager from './MasterPricingManager';
+import AdminOrderItemEditorModal, { OrderItem } from './AdminOrderItemEditorModal';
 
 import HERO_IMAGE_PATH from '../assets/images/luxe_laundry_hero_1782710394352.jpg';
 import logoImg from '../assets/images/tumblespin_header_logo.png';
@@ -177,6 +179,7 @@ export default function AdminPanel({
   const [errorMsg, setErrorMsg] = useState('');
   const [orders, setOrders] = useState<OrderData[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderData | null>(null);
+  const [editingOrderForItems, setEditingOrderForItems] = useState<OrderData | null>(null);
   const [activeTab, setActiveTab] = useState<'bookings' | 'promo' | 'pricing' | 'profile' | 'business' | 'customers' | 'analytics' | 'deleted_orders' | 'webhooks'>('bookings');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
@@ -1222,6 +1225,71 @@ export default function AdminPanel({
     }, 3500);
   };
 
+  // Handler for Admin and Master Admin to edit ordered items in orders & bookings
+  const handleSaveOrderItems = async (
+    orderId: string,
+    updatedItems: OrderItem[],
+    updatedTotalPrice: number,
+    editNote?: string
+  ) => {
+    let targetUpdated: OrderData | null = null;
+
+    const updatedOrders = orders.map(order => {
+      if (order.orderId === orderId) {
+        const timestamp = new Date().toLocaleString();
+        const newTimelineItem = {
+          step: (order.timeline?.length || 0) + 1,
+          title: 'Ordered Items Updated',
+          desc: editNote || `Admin revised ordered items: ${updatedItems.length} garments (Total ₹${Number(updatedTotalPrice).toFixed(2)})`,
+          time: timestamp,
+          done: true,
+          active: false
+        };
+
+        const itemServiceTypes = Array.from(new Set(updatedItems.map(i => i.serviceType || i.category).filter(Boolean)));
+        const mergedServices = Array.from(new Set([...(order.selectedServices || []), ...itemServiceTypes]));
+
+        const updated: OrderData = {
+          ...order,
+          subServices: updatedItems,
+          totalPrice: updatedTotalPrice,
+          selectedServices: mergedServices.length > 0 ? mergedServices : order.selectedServices,
+          timeline: order.timeline ? [...order.timeline, newTimelineItem] : [newTimelineItem]
+        };
+
+        targetUpdated = updated;
+        if (selectedOrder?.orderId === orderId) {
+          setSelectedOrder(updated);
+        }
+        return updated;
+      }
+      return order;
+    });
+
+    setOrders(updatedOrders);
+    localStorage.setItem('tumblespin_orders', JSON.stringify(updatedOrders));
+
+    // Direct Firestore update for cross-device & client tracking sync
+    if (targetUpdated) {
+      try {
+        await setDoc(doc(db, 'orders', orderId), targetUpdated);
+      } catch (fsErr) {
+        console.warn('Firestore sync failed in handleSaveOrderItems, relying on local sync:', fsErr);
+      }
+    }
+
+    setNotifToast({
+      visible: true,
+      message: `✨ Order #${orderId} garments & total bill updated successfully!`,
+      status: targetUpdated?.status || 'Updated'
+    });
+    setTimeout(() => {
+      setNotifToast(prev => ({ ...prev, visible: false }));
+    }, 4000);
+
+    window.dispatchEvent(new Event('storage'));
+  };
+
   const handlePurgeDeletedOrders = () => {
     setDeletedOrders([]);
     localStorage.setItem('tumblespin_deleted_orders', JSON.stringify([]));
@@ -2082,9 +2150,24 @@ export default function AdminPanel({
                                       {o.fullName}
                                     </h4>
                                   </div>
-                                  <span className="text-[9px] font-bold bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/15 dark:text-brand-accent px-2 py-0.5 rounded-sm">
-                                    ₹{Number(o.totalPrice || 0).toFixed(2)}
-                                  </span>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className="text-[9px] font-bold bg-brand-primary/10 text-brand-primary dark:bg-brand-accent/15 dark:text-brand-accent px-2 py-0.5 rounded-sm">
+                                      ₹{Number(o.totalPrice || 0).toFixed(2)}
+                                    </span>
+                                    {(adminRole === 'admin' || adminRole === 'master') && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingOrderForItems(o);
+                                        }}
+                                        className="text-[9px] font-bold text-teal-600 dark:text-brand-accent hover:underline flex items-center gap-0.5 cursor-pointer"
+                                        title="Edit items in this booking"
+                                      >
+                                        <Edit3 className="h-2.5 w-2.5" /> Edit Items
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed break-words">
@@ -2240,9 +2323,23 @@ export default function AdminPanel({
 
                           {/* Items & Subservices Table */}
                           <div className="p-5 bg-slate-50 dark:bg-brand-deep/20 rounded-2xl border border-slate-100 dark:border-brand-teal/5 space-y-3">
-                            <h5 className="font-bold text-slate-800 dark:text-white font-mono uppercase tracking-wider text-[10px]">
-                              Itemized Garments & Costs
-                            </h5>
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <h5 className="font-bold text-slate-800 dark:text-white font-mono uppercase tracking-wider text-[10px]">
+                                Itemized Garments & Costs
+                              </h5>
+
+                              {(adminRole === 'admin' || adminRole === 'master') && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingOrderForItems(selectedOrder)}
+                                  className="text-[11px] font-bold text-teal-600 dark:text-brand-accent hover:text-teal-700 dark:hover:text-teal-300 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-brand-deep border border-teal-200/60 dark:border-brand-teal/20 hover:bg-teal-100/60 transition-all cursor-pointer shadow-2xs"
+                                  title="Edit garments, quantities, rates, or add new items"
+                                >
+                                  <Edit3 className="h-3 w-3" />
+                                  <span>Edit Ordered Items</span>
+                                </button>
+                              )}
+                            </div>
 
                             <div className="divide-y divide-slate-200/60 dark:divide-brand-teal/5 space-y-2">
                               {selectedOrder.subServices && selectedOrder.subServices.length > 0 ? (
@@ -2259,7 +2356,19 @@ export default function AdminPanel({
                                   </div>
                                 ))
                               ) : (
-                                <p className="text-xs text-slate-400">Standard general services selected.</p>
+                                <div className="py-2">
+                                  <p className="text-xs text-slate-400">Standard general services selected.</p>
+                                  {(adminRole === 'admin' || adminRole === 'master') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingOrderForItems(selectedOrder)}
+                                      className="mt-1.5 text-xs font-bold text-teal-600 dark:text-brand-accent flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      <span>Add / itemize garments for this booking</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
 
                               <div className="flex justify-between items-baseline pt-3 font-bold text-sm">
@@ -2268,6 +2377,19 @@ export default function AdminPanel({
                                   ₹{Number(selectedOrder.totalPrice || 0).toFixed(2)}
                                 </span>
                               </div>
+
+                              {(adminRole === 'admin' || adminRole === 'master') && (
+                                <div className="pt-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingOrderForItems(selectedOrder)}
+                                    className="text-xs font-bold text-teal-700 dark:text-brand-accent hover:bg-teal-50 dark:hover:bg-brand-deep/50 px-3 py-1.5 rounded-lg border border-teal-200 dark:border-brand-teal/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Edit3 className="h-3.5 w-3.5" />
+                                    <span>Modify Ordered Garments & Rates</span>
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -3463,6 +3585,21 @@ export default function AdminPanel({
                                           ))}
                                         </div>
                                       </div>
+
+                                      {(adminRole === 'admin' || adminRole === 'master') && (
+                                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-brand-teal/5 flex justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const fullOrder = orders.find(o => o.orderId === order.orderId) || order;
+                                              setEditingOrderForItems(fullOrder);
+                                            }}
+                                            className="text-[10px] font-bold text-teal-600 dark:text-brand-accent hover:underline flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Edit3 className="h-3 w-3" /> Edit Ordered Items
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -4427,6 +4564,15 @@ export default function AdminPanel({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ADMIN & MASTER ADMIN ORDERED ITEMS EDITOR MODAL */}
+      <AdminOrderItemEditorModal
+        isOpen={Boolean(editingOrderForItems)}
+        onClose={() => setEditingOrderForItems(null)}
+        order={editingOrderForItems}
+        adminRole={adminRole}
+        onSave={handleSaveOrderItems}
+      />
     </AnimatePresence>
   );
 }
