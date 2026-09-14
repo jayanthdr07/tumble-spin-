@@ -15,6 +15,12 @@ import { useBusinessInfo } from '../utils/useBusinessInfo';
 import { db, isFirestoreSuspended } from '../lib/firebase';
 import { doc, setDoc, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { useMasterCatalog, getDeletedCatalogItemIds } from '../utils/catalogStore';
+import { 
+  usePricingSync, 
+  adjustPriceWithDynamicPricing, 
+  getServiceBasePrice, 
+  DynamicPricingConfig 
+} from '../utils/pricingUtils';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -202,41 +208,14 @@ export default function BookingModal({
   initialStep,
   initialWhatsAppMode, 
   initialBookingType,
-  dynamicPricing 
+  dynamicPricing: propDynamicPricing 
 }: BookingModalProps) {
   const businessInfo = useBusinessInfo();
   const finalPaymentUrl = businessInfo.razorpayUrl || 'https://razorpay.me/@tumblespin';
 
-  const [customPrices, setCustomPrices] = useState<any>(() => {
-    const saved = localStorage.getItem('tumblespin_custom_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    const handleStorageChange = (e?: any) => {
-      if (e?.detail) {
-        setCustomPrices(e.detail);
-        return;
-      }
-      const saved = localStorage.getItem('tumblespin_custom_prices');
-      if (saved) {
-        try {
-          setCustomPrices(JSON.parse(saved));
-        } catch (err) {}
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-    };
-  }, []);
+  // Live-synchronized dynamic pricing and custom prices from Firestore and local events
+  const { dynamicPricing, customPrices } = usePricingSync(propDynamicPricing);
+  const isDynamicActive = Boolean(dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0);
 
   const { items: liveCatalogItems } = useMasterCatalog();
 
@@ -245,16 +224,29 @@ export default function BookingModal({
     const deletedSet = new Set(deletedIds);
 
     const baseMerged = SUB_SERVICES.filter(s => !deletedSet.has(s.id)).map(service => {
+      // 1. Direct booking override
       const override = customPrices?.booking?.[service.id];
-      if (override !== undefined && override !== null && override !== '') {
+      if (override !== undefined && override !== null && override !== '' && !isNaN(Number(override))) {
         return { ...service, price: Number(override) };
       }
-      // Also check estimator dryClean override if set
+      // 2. Specific item cross-references from admin services overrides
+      if (service.id === 'laundry-wash-fold') {
+        const sOverride = customPrices?.services?.['wash-fold'];
+        if (sOverride !== undefined && sOverride !== null && sOverride !== '' && !isNaN(Number(sOverride))) {
+          return { ...service, price: Number(sOverride) };
+        }
+      } else if (service.id === 'laundry-wash-steam-iron') {
+        const sOverride = customPrices?.services?.['wash-iron'];
+        if (sOverride !== undefined && sOverride !== null && sOverride !== '' && !isNaN(Number(sOverride))) {
+          return { ...service, price: Number(sOverride) };
+        }
+      }
+      // 3. Estimator dryClean override if set
       const estimatorOverride = customPrices?.estimator?.[service.id]?.dryClean;
-      if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '') {
+      if (estimatorOverride !== undefined && estimatorOverride !== null && estimatorOverride !== '' && !isNaN(Number(estimatorOverride))) {
         return { ...service, price: Number(estimatorOverride) };
       }
-      // Check live catalog default price
+      // 4. Check live catalog default price
       const liveMatch = liveCatalogItems.find(c => c.id === service.id || c.estimatorItemId === service.id);
       if (liveMatch && liveMatch.defaultPrice !== undefined) {
         return { ...service, price: liveMatch.defaultPrice };
@@ -826,50 +818,42 @@ export default function BookingModal({
   };
 
   const adjustPrice = (price: number) => {
-    if (!dynamicPricing || dynamicPricing.mode === 'none' || !dynamicPricing.percentage) return price;
-    if (dynamicPricing.mode === 'surcharge') {
-      return Math.round(price + (price * dynamicPricing.percentage) / 100);
-    } else {
-      return Math.round(price - (price * dynamicPricing.percentage) / 100);
+    return adjustPriceWithDynamicPricing(price, dynamicPricing);
+  };
+
+  const getServicePriceDisplay = (id: string, defaultPriceText: string) => {
+    if (id === 'hassle-free') return <span>TBD at Pickup</span>;
+
+    const basePrice = getServiceBasePrice(id, customPrices, liveCatalogItems);
+    if (!basePrice) return <span>{defaultPriceText}</span>;
+
+    const adjusted = adjustPrice(basePrice);
+    const suffix = (id === 'wash-fold' || id === 'wash-iron') ? '/kg' : (id === 'express' ? ' flat' : '/item');
+    const prefix = id === 'express' ? '+' : '';
+
+    if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage && adjusted !== basePrice) {
+      return (
+        <span className="inline-flex items-center gap-1.5 flex-wrap justify-end">
+          <span className="line-through text-slate-400 font-mono text-[10.5px]">
+            {prefix}₹{basePrice}{suffix}
+          </span>
+          <span className="font-bold font-mono text-teal-600 dark:text-teal-400">
+            {prefix}₹{adjusted}{suffix}
+          </span>
+        </span>
+      );
     }
+
+    return <span>{prefix}₹{adjusted}{suffix}</span>;
   };
 
   const getServicePriceText = (id: string, defaultPriceText: string) => {
-    const defaultPrices: { [key: string]: number } = {
-      'wash-fold': 95,
-      'wash-iron': 129,
-      'dry-cleaning': 199,
-      'steam-iron': 49,
-      'premium-care': 399,
-      'shoe-spa': 299,
-      'express': 499
-    };
-    
     if (id === 'hassle-free') return 'TBD at Pickup';
-
-    // Get the custom price from services overrides first
-    const customPrice = customPrices?.services?.[id];
-    let basePrice = (customPrice !== undefined && customPrice !== null && customPrice !== '')
-      ? Number(customPrice)
-      : defaultPrices[id];
-
-    // If not found in services overrides, check if there's a corresponding sub-service override
-    if (id === 'wash-fold') {
-      basePrice = getSubservicePriceVal('laundry-wash-fold', basePrice);
-    } else if (id === 'wash-iron') {
-      basePrice = getSubservicePriceVal('laundry-wash-steam-iron', basePrice);
-    }
-
+    const basePrice = getServiceBasePrice(id, customPrices, liveCatalogItems);
     if (!basePrice) return defaultPriceText;
-
     const adjusted = adjustPrice(basePrice);
-
-    if (id === 'wash-fold' || id === 'wash-iron') {
-      return `₹${adjusted}/kg`;
-    }
-    if (id === 'express') {
-      return `+₹${adjusted} flat`;
-    }
+    if (id === 'wash-fold' || id === 'wash-iron') return `₹${adjusted}/kg`;
+    if (id === 'express') return `+₹${adjusted} flat`;
     return `₹${adjusted}/item`;
   };
 
@@ -2636,6 +2620,25 @@ export default function BookingModal({
                       </div>
 
                       <div className="mb-4">
+                        {/* Dynamic Pricing Live Banner */}
+                        {dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0 && (
+                          <div className={`p-3 rounded-xl border flex items-center justify-between text-xs mb-3 ${
+                            dynamicPricing.mode === 'surcharge'
+                              ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+                              : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="h-4 w-4 shrink-0" />
+                              <span className="font-semibold">
+                                {dynamicPricing.label} ({dynamicPricing.mode === 'surcharge' ? '+' : '-'}{dynamicPricing.percentage}% applied storewide)
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10 shrink-0">
+                              Active Pricing
+                            </span>
+                          </div>
+                        )}
+
                         <p className="text-sm text-slate-600 dark:text-slate-300">
                           Select the cleaning modules to include in this booking. Our garment specialists will inspect each piece upon arrival to customize the cleaning treatment.
                         </p>
@@ -2657,15 +2660,15 @@ export default function BookingModal({
                                   : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/40'
                               }`}
                             >
-                              <div className="flex items-start justify-between">
+                              <div className="flex items-start justify-between gap-2">
                                 <h5 className="font-semibold text-slate-900 dark:text-white text-sm">
                                   {srv.name}
                                 </h5>
-                                <span className={`text-xs font-mono font-bold ${
+                                <div className={`text-xs font-mono font-bold shrink-0 ${
                                   isSelected ? 'text-brand-primary dark:text-brand-accent' : 'text-slate-500'
                                 }`}>
-                                  {getServicePriceText(srv.id, srv.price)}
-                                </span>
+                                  {getServicePriceDisplay(srv.id, srv.price)}
+                                </div>
                               </div>
                               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
                                 {srv.description}
@@ -2821,8 +2824,14 @@ export default function BookingModal({
                                           <div className="text-xs font-bold text-slate-800 dark:text-white truncate">
                                             {item.name}
                                           </div>
-                                          <div className="text-[10px] text-slate-400 font-mono">
-                                            ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''} • {item.serviceType}
+                                          <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 flex-wrap">
+                                            {isDynamicActive && adjustPrice(item.price) !== item.price && (
+                                              <span className="line-through text-slate-400/80">₹{item.price}</span>
+                                            )}
+                                            <span className={isDynamicActive && adjustPrice(item.price) !== item.price ? 'font-bold text-teal-600 dark:text-teal-400' : ''}>
+                                              ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''}
+                                            </span>
+                                            <span>• {item.serviceType}</span>
                                           </div>
                                         </div>
                                       </div>
@@ -3643,7 +3652,15 @@ export default function BookingModal({
                                   </div>
                                   <div className="space-y-0.5 min-w-0">
                                     <h5 className="text-xs font-bold text-slate-800 dark:text-white truncate">{item.name}</h5>
-                                    <p className="text-[10px] text-slate-400 font-mono">{item.serviceType} • ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''}</p>
+                                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 flex-wrap">
+                                      <span>{item.serviceType} •</span>
+                                      {isDynamicActive && adjustPrice(item.price) !== item.price && (
+                                        <span className="line-through text-slate-400/80">₹{item.price}</span>
+                                      )}
+                                      <span className={isDynamicActive && adjustPrice(item.price) !== item.price ? 'font-bold text-brand-primary dark:text-brand-accent' : ''}>
+                                        ₹{adjustPrice(item.price)}{isLaundryKg ? '/kg' : ''}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
 

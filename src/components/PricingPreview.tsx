@@ -6,14 +6,16 @@ import {
 } from 'lucide-react';
 import { getItemIcon } from '../utils/itemIcons';
 import { useMasterCatalog } from '../utils/catalogStore';
+import { 
+  usePricingSync, 
+  adjustPriceStringWithDynamic, 
+  getServiceBasePrice, 
+  DynamicPricingConfig 
+} from '../utils/pricingUtils';
 
 interface PricingPreviewProps {
   onOpenBooking: () => void;
-  dynamicPricing?: {
-    mode: 'surcharge' | 'discount' | 'none';
-    percentage: number;
-    label: string;
-  };
+  dynamicPricing?: DynamicPricingConfig;
 }
 
 interface PriceItem {
@@ -138,22 +140,40 @@ const PRICING_DATA: PriceCategory[] = [
   }
 ];
 
-export default function PricingPreview({ onOpenBooking, dynamicPricing }: PricingPreviewProps) {
+export default function PricingPreview({ onOpenBooking, dynamicPricing: propDynamicPricing }: PricingPreviewProps) {
   const [activeCategory, setActiveCategory] = useState<string>('laundry');
   const { items: liveCatalogItems } = useMasterCatalog();
+  const { dynamicPricing, customPrices } = usePricingSync(propDynamicPricing);
 
-  // Dynamically merge live catalog items with base PRICING_DATA
+  const isDynamicActive = Boolean(dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0);
+
+  // Dynamically merge live catalog items and custom overrides with base PRICING_DATA
   const mergedCategories = useMemo(() => {
     // Check for custom items added to existing categories
     const baseCats = PRICING_DATA.map(cat => {
       const catIdNorm = cat.id === 'woolen' ? 'woolens' : cat.id;
       
+      // Update base item rates if overridden in admin customPrices or liveCatalogItems
+      const updatedItems = cat.items.map(item => {
+        if (cat.id === 'laundry') {
+          if (item.name.includes("Wash & Fold")) {
+            const washFoldPrice = getServiceBasePrice('wash-fold', customPrices, liveCatalogItems);
+            return { ...item, dryClean: `₹${washFoldPrice}` };
+          }
+          if (item.name.includes("Wash & Steam Iron")) {
+            const washIronPrice = getServiceBasePrice('wash-iron', customPrices, liveCatalogItems);
+            return { ...item, dryClean: `₹${washIronPrice}` };
+          }
+        }
+        return item;
+      });
+
       const customItemsInCat = liveCatalogItems.filter(item => {
         const itemCatNorm = item.category === 'woolen' ? 'woolens' : item.category;
         return itemCatNorm === catIdNorm && item.isCustom;
       });
 
-      if (customItemsInCat.length === 0) return cat;
+      if (customItemsInCat.length === 0) return { ...cat, items: updatedItems };
 
       const dynamicPriceItems: PriceItem[] = customItemsInCat.map(ci => ({
         name: ci.name + (ci.unit && ci.unit !== 'per pc' ? ` (${ci.unit})` : ''),
@@ -163,7 +183,7 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
 
       return {
         ...cat,
-        items: [...cat.items, ...dynamicPriceItems]
+        items: [...updatedItems, ...dynamicPriceItems]
       };
     });
 
@@ -213,23 +233,12 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
     });
 
     return [...baseCats, ...extraCategories];
-  }, [liveCatalogItems]);
+  }, [liveCatalogItems, customPrices]);
 
   const selectedCategory = mergedCategories.find(c => c.id === activeCategory) || mergedCategories[0];
 
   const adjustPriceString = (priceStr: string) => {
-    if (!dynamicPricing || dynamicPricing.mode === 'none' || !dynamicPricing.percentage) return priceStr;
-    return priceStr.replace(/(₹)?(\d+)(\+)?/g, (match, rSign, numStr, plusSign) => {
-      const val = parseInt(numStr, 10);
-      if (isNaN(val)) return match;
-      let adjusted = val;
-      if (dynamicPricing.mode === 'surcharge') {
-        adjusted = val + (val * dynamicPricing.percentage) / 100;
-      } else if (dynamicPricing.mode === 'discount') {
-        adjusted = val - (val * dynamicPricing.percentage) / 100;
-      }
-      return `${rSign || '₹'}${Math.round(adjusted)}${plusSign || ''}`;
-    });
+    return adjustPriceStringWithDynamic(priceStr, dynamicPricing);
   };
 
   return (
@@ -353,24 +362,45 @@ export default function PricingPreview({ onOpenBooking, dynamicPricing }: Pricin
                         /* Household / Shoes / Bags Single Dry Clean Column */
                         <div className="sm:col-span-6 text-right flex justify-between sm:justify-end items-center gap-2 mt-1 sm:mt-0">
                           <span className="sm:hidden text-xs text-slate-400 dark:text-slate-500">Dry Clean</span>
-                          <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
-                            {adjustPriceString(item.dryClean)}
-                          </span>
+                          <div className="flex items-center gap-1.5 justify-end">
+                            {isDynamicActive && adjustPriceString(item.dryClean) !== item.dryClean && (
+                              <span className="text-xs line-through text-slate-400 font-mono">
+                                {item.dryClean}
+                              </span>
+                            )}
+                            <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
+                              {adjustPriceString(item.dryClean)}
+                            </span>
+                          </div>
                         </div>
                       ) : (
                         /* Dry Clean & Steam Iron Multi Columns */
                         <>
                           <div className="sm:col-span-3 text-right flex justify-between sm:justify-end items-center gap-2 mt-1 sm:mt-0">
                             <span className="sm:hidden text-xs text-slate-400 dark:text-slate-500">Dry Clean</span>
-                            <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
-                              {adjustPriceString(item.dryClean)}
-                            </span>
+                            <div className="flex items-center gap-1.5 justify-end">
+                              {isDynamicActive && adjustPriceString(item.dryClean) !== item.dryClean && (
+                                <span className="text-xs line-through text-slate-400 font-mono">
+                                  {item.dryClean}
+                                </span>
+                              )}
+                              <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
+                                {adjustPriceString(item.dryClean)}
+                              </span>
+                            </div>
                           </div>
                           <div className="sm:col-span-3 text-right flex justify-between sm:justify-end items-center gap-2 mt-1 sm:mt-0">
                             <span className="sm:hidden text-xs text-slate-400 dark:text-slate-500">Steam Iron</span>
-                            <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
-                              {item.steamIron ? adjustPriceString(item.steamIron) : 'NA'}
-                            </span>
+                            <div className="flex items-center gap-1.5 justify-end">
+                              {isDynamicActive && item.steamIron && adjustPriceString(item.steamIron) !== item.steamIron && (
+                                <span className="text-xs line-through text-slate-400 font-mono">
+                                  {item.steamIron}
+                                </span>
+                              )}
+                              <span className="text-sm font-bold font-mono text-slate-800 dark:text-white">
+                                {item.steamIron ? adjustPriceString(item.steamIron) : 'NA'}
+                              </span>
+                            </div>
                           </div>
                         </>
                       )}

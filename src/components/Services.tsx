@@ -4,6 +4,13 @@ import {
   Shirt, Sparkles, Wind, Flame, Zap, HeartPulse, 
   ArrowUpRight, Info, CheckCircle2, Footprints
 } from 'lucide-react';
+import { 
+  usePricingSync, 
+  getServiceBasePrice, 
+  adjustPriceWithDynamicPricing, 
+  DynamicPricingConfig 
+} from '../utils/pricingUtils';
+import { useMasterCatalog } from '../utils/catalogStore';
 
 import washAndFoldImg from '../assets/images/wash_and_fold_new_priya.jpg';
 import steamIroningImg from '../assets/images/steam_ironing_service_1783419251852.jpg';
@@ -13,69 +20,35 @@ import premiumShoeSpaImg from '../assets/images/premium_shoe_spa_new.jpg';
 
 interface ServicesProps {
   onSelectService: (id: string) => void;
+  dynamicPricing?: DynamicPricingConfig;
 }
 
-export default function Services({ onSelectService }: ServicesProps) {
+export default function Services({ onSelectService, dynamicPricing: propDynamicPricing }: ServicesProps) {
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load custom prices dynamically
-  const [customPrices, setCustomPrices] = useState<any>(() => {
-    const saved = localStorage.getItem('tumblespin_custom_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return {};
-  });
+  // Live unified dynamic pricing and custom rate overrides
+  const { dynamicPricing, customPrices } = usePricingSync(propDynamicPricing);
+  const { items: liveCatalogItems } = useMasterCatalog();
 
-  useEffect(() => {
-    const handleStorageChange = (e?: any) => {
-      if (e?.detail) {
-        setCustomPrices(e.detail);
-        return;
-      }
-      const saved = localStorage.getItem('tumblespin_custom_prices');
-      if (saved) {
-        try {
-          setCustomPrices(JSON.parse(saved));
-        } catch (err) {}
-      }
+  const isDynamicActive = Boolean(dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0);
+
+  const formatUnit = (id: string, price: number) => {
+    if (id === 'express') return `+₹${price} flat`;
+    if (id === 'wash-fold' || id === 'wash-iron') return `₹${price}/kg`;
+    if (id === 'shoe-spa') return `₹${price}/pair`;
+    return `₹${price}/item`;
+  };
+
+  const getServiceDisplay = (id: string) => {
+    const basePrice = getServiceBasePrice(id, customPrices, liveCatalogItems);
+    const adjustedPrice = adjustPriceWithDynamicPricing(basePrice, dynamicPricing);
+    return {
+      basePrice,
+      adjustedPrice,
+      formattedBase: formatUnit(id, basePrice),
+      formattedAdjusted: formatUnit(id, adjustedPrice),
+      hasDynamicMultiplier: isDynamicActive && basePrice !== adjustedPrice
     };
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-    };
-  }, []);
-
-  const getServicePriceString = (id: string, defaultPrice: string) => {
-    const override = customPrices?.services?.[id];
-    if (override !== undefined && override !== null && override !== '') {
-      if (id === 'express') {
-        return `+₹${override} flat`;
-      } else if (id === 'wash-fold' || id === 'wash-iron') {
-        return `₹${override}/kg`;
-      } else if (id === 'dry-cleaning' || id === 'premium-care' || id === 'steam-iron') {
-        return `₹${override}/item`;
-      } else if (id === 'shoe-spa') {
-        return `₹${override}/pair`;
-      }
-      return `₹${override}`;
-    }
-
-    // Fallbacks to booking overrides if service override is not explicitly set
-    if (id === 'wash-fold' && customPrices?.booking?.['laundry-wash-fold'] !== undefined) {
-      return `₹${customPrices.booking['laundry-wash-fold']}/kg`;
-    }
-    if (id === 'wash-iron' && customPrices?.booking?.['laundry-wash-steam-iron'] !== undefined) {
-      return `₹${customPrices.booking['laundry-wash-steam-iron']}/kg`;
-    }
-    if (id === 'shoe-spa' && customPrices?.booking?.['shoes-spa-care'] !== undefined) {
-      return `₹${customPrices.booking['shoes-spa-care']}/pair`;
-    }
-    return defaultPrice;
   };
 
   useEffect(() => {
@@ -193,6 +166,23 @@ export default function Services({ onSelectService }: ServicesProps) {
           <p className="text-slate-600 dark:text-slate-200 max-w-xl mx-auto text-sm">
             We don’t just clean; we restore. Choose individual packages or bundle them together in your pickup wizard.
           </p>
+
+          {isDynamicActive && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold font-mono"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              </span>
+              <span>
+                {dynamicPricing.mode === 'surcharge' ? '⚡ ' : '🎉 '}
+                {dynamicPricing.label} ({dynamicPricing.mode === 'surcharge' ? `+${dynamicPricing.percentage}%` : `-${dynamicPricing.percentage}%`}) Applied
+              </span>
+            </motion.div>
+          )}
         </motion.div>
 
         {isLoading ? (
@@ -291,14 +281,26 @@ export default function Services({ onSelectService }: ServicesProps) {
                     </div>
 
                     {/* Service Badge & Price */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-bold tracking-widest text-brand-primary dark:text-brand-accent uppercase font-mono">
-                        {service.badge}
-                      </span>
-                      <span className="text-sm sm:text-base font-mono font-black text-brand-primary dark:text-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 px-3 py-1.5 rounded-full border border-brand-primary/10 dark:border-brand-accent/10">
-                        {getServicePriceString(service.id, service.price)}
-                      </span>
-                    </div>
+                    {(() => {
+                      const priceInfo = getServiceDisplay(service.id);
+                      return (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[9px] font-bold tracking-widest text-brand-primary dark:text-brand-accent uppercase font-mono">
+                            {service.badge}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {priceInfo.hasDynamicMultiplier && (
+                              <span className="text-xs line-through text-slate-400 font-mono">
+                                {priceInfo.formattedBase}
+                              </span>
+                            )}
+                            <span className="text-sm sm:text-base font-mono font-black text-brand-primary dark:text-brand-accent bg-brand-primary/5 dark:bg-brand-accent/5 px-3 py-1.5 rounded-full border border-brand-primary/10 dark:border-brand-accent/10">
+                              {priceInfo.formattedAdjusted}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Icon & Title */}
                     <div className="flex items-center gap-3">

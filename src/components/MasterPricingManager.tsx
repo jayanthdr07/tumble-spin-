@@ -450,6 +450,7 @@ export default function MasterPricingManager({
       // 5. Dispatch events for real-time reactivity
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new CustomEvent('tumblespin_custom_prices_updated', { detail: sanitized }));
+      window.dispatchEvent(new CustomEvent('tumblespin_dynamic_pricing_updated', { detail: updatedDynamic }));
 
       setSuccessMsg('✨ All prices saved permanently and published live across all devices!');
       setTimeout(() => setSuccessMsg(''), 4500);
@@ -899,6 +900,22 @@ export default function MasterPricingManager({
                             </div>
                           </div>
                         )}
+
+                        {/* Live dynamic pricing preview indicator */}
+                        {localPricingMode !== 'none' && localPricingPercentage > 0 && (() => {
+                          const activeBase = currentCustomVal !== null ? currentCustomVal : item.defaultPrice;
+                          const dynPrice = localPricingMode === 'surcharge'
+                            ? Math.round(activeBase + (activeBase * localPricingPercentage) / 100)
+                            : Math.max(1, Math.round(activeBase - (activeBase * localPricingPercentage) / 100));
+                          return (
+                            <div className="flex items-center justify-between text-[10px] font-mono px-2 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                              <span className="font-semibold">Customer Pays:</span>
+                              <span className="font-extrabold text-xs">
+                                ₹{dynPrice} <span className="text-[9px] font-normal">({localPricingMode === 'surcharge' ? `+${localPricingPercentage}%` : `-${localPricingPercentage}%`})</span>
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   );

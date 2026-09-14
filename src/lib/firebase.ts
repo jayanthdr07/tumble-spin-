@@ -487,6 +487,9 @@ export function initializeFirebaseSync(isAdmin: boolean = false) {
               if (docId === 'custom_prices') {
                 window.dispatchEvent(new CustomEvent('tumblespin_custom_prices_updated', { detail: docData.data }));
               }
+              if (docId === 'dynamic_pricing') {
+                window.dispatchEvent(new CustomEvent('tumblespin_dynamic_pricing_updated', { detail: docData.data }));
+              }
               if (docId === 'custom_catalog_items_v3') {
                 window.dispatchEvent(new CustomEvent('tumblespin_catalog_updated', { detail: docData.data }));
               }

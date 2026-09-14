@@ -88,6 +88,7 @@ export default function App() {
     localStorage.setItem('tumblespin_dynamic_pricing', JSON.stringify(newConfig));
     // Trigger custom storage event so other components update dynamically if they listen to it
     window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('tumblespin_dynamic_pricing_updated', { detail: newConfig }));
   };
 
   const handleDismissPromo = () => {
@@ -100,7 +101,11 @@ export default function App() {
 
   // Listen to background storage events (from Firestore real-time sync)
   useEffect(() => {
-    const handleStorageChange = () => {
+    const handleStorageChange = (e?: any) => {
+      if (e?.type === 'tumblespin_dynamic_pricing_updated' && e?.detail) {
+        setDynamicPricing(e.detail);
+        return;
+      }
       const savedPromo = localStorage.getItem('tumblespin_promo');
       if (savedPromo) {
         try {
@@ -120,7 +125,11 @@ export default function App() {
     };
 
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('tumblespin_dynamic_pricing_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('tumblespin_dynamic_pricing_updated', handleStorageChange);
+    };
   }, []);
 
   // Apply dark mode (Night Light) styling to document html tag permanently
@@ -212,7 +221,10 @@ export default function App() {
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: [0.25, 1, 0.5, 1] }}
         >
-          <Services onSelectService={(id) => handleOpenBooking(id)} />
+          <Services 
+            onSelectService={(id) => handleOpenBooking(id)} 
+            dynamicPricing={dynamicPricing}
+          />
         </motion.div>
 
         {/* 8. Pricing Tariffs / Packages */}
@@ -275,7 +287,10 @@ export default function App() {
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: [0.25, 1, 0.5, 1] }}
         >
-          <ServiceEstimator onOpenBooking={handleOpenBooking} />
+          <ServiceEstimator 
+            onOpenBooking={handleOpenBooking} 
+            dynamicPricing={dynamicPricing}
+          />
         </motion.div>
 
         {/* Before & After Restoration Gallery */}

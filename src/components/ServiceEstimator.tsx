@@ -7,6 +7,11 @@ import {
 } from 'lucide-react';
 import { getItemIcon } from '../utils/itemIcons';
 import { getDeletedCatalogItemIds, useMasterCatalog } from '../utils/catalogStore';
+import { 
+  usePricingSync, 
+  adjustPriceWithDynamicPricing, 
+  DynamicPricingConfig 
+} from '../utils/pricingUtils';
 
 export interface EstimatorItem {
   id: string;
@@ -115,46 +120,17 @@ interface CartItem {
 
 interface ServiceEstimatorProps {
   onOpenBooking: (initialServiceId?: string, initialQuantities?: Record<string, number>, initialStep?: number) => void;
+  dynamicPricing?: DynamicPricingConfig;
 }
 
-export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProps) {
+export default function ServiceEstimator({ onOpenBooking, dynamicPricing: propDynamicPricing }: ServiceEstimatorProps) {
   const [activeCategory, setActiveCategory] = useState<string>('laundry');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedServiceType, setSelectedServiceType] = useState<Record<string, 'Dry Clean' | 'Steam Iron'>>({});
 
-  // Load custom prices dynamically
-  const [customPrices, setCustomPrices] = useState<any>(() => {
-    const saved = localStorage.getItem('tumblespin_custom_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    const handleStorageChange = (e?: any) => {
-      if (e?.detail) {
-        setCustomPrices(e.detail);
-        return;
-      }
-      const saved = localStorage.getItem('tumblespin_custom_prices');
-      if (saved) {
-        try {
-          setCustomPrices(JSON.parse(saved));
-        } catch (err) {}
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-    window.addEventListener('tumblespin_catalog_deleted_updated', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('tumblespin_custom_prices_updated', handleStorageChange);
-      window.removeEventListener('tumblespin_catalog_deleted_updated', handleStorageChange);
-    };
-  }, []);
+  // Live unified dynamic pricing and custom rate overrides
+  const { dynamicPricing, customPrices } = usePricingSync(propDynamicPricing);
+  const isDynamicActive = Boolean(dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0);
 
   const { items: liveCatalogItems } = useMasterCatalog();
   const deletedIds = getDeletedCatalogItemIds();
@@ -230,7 +206,21 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     return 'Steam Iron';
   };
 
-  const getPriceForType = (item: EstimatorItem, type: 'Dry Clean' | 'Steam Iron'): number => {
+  const getBasePriceForType = (item: EstimatorItem, type: 'Dry Clean' | 'Steam Iron'): number => {
+    // Cross-link laundry services if overridden under services
+    if (item.id === 'laundry-wash-fold') {
+      const sOverride = customPrices?.services?.['wash-fold'];
+      if (sOverride !== undefined && sOverride !== null && sOverride !== '') return Number(sOverride);
+      const bOverride = customPrices?.booking?.['laundry-wash-fold'];
+      if (bOverride !== undefined && bOverride !== null && bOverride !== '') return Number(bOverride);
+    }
+    if (item.id === 'laundry-wash-iron') {
+      const sOverride = customPrices?.services?.['wash-iron'];
+      if (sOverride !== undefined && sOverride !== null && sOverride !== '') return Number(sOverride);
+      const bOverride = customPrices?.booking?.['laundry-wash-steam-iron'];
+      if (bOverride !== undefined && bOverride !== null && bOverride !== '') return Number(bOverride);
+    }
+
     const key = type === 'Dry Clean' ? 'dryClean' : 'steamIron';
     const override = customPrices?.estimator?.[item.id]?.[key];
     if (override !== undefined && override !== null && override !== '') {
@@ -253,6 +243,11 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
     }
     if (type === 'Dry Clean') return item.dryCleanPrice || 0;
     return item.steamIronPrice || 0;
+  };
+
+  const getPriceForType = (item: EstimatorItem, type: 'Dry Clean' | 'Steam Iron'): number => {
+    const base = getBasePriceForType(item, type);
+    return adjustPriceWithDynamicPricing(base, dynamicPricing);
   };
 
   const addToCart = (item: EstimatorItem) => {
@@ -334,6 +329,19 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
           <p className="text-slate-500 dark:text-slate-300 text-sm sm:text-base max-w-md mx-auto">
             Select items and see an instant price projection. Fresh premium garments have never been simpler to budget.
           </p>
+
+          {isDynamicActive && (
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold font-mono">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              </span>
+              <span>
+                {dynamicPricing.mode === 'surcharge' ? '⚡ ' : '🎉 '}
+                {dynamicPricing.label} ({dynamicPricing.mode === 'surcharge' ? `+${dynamicPricing.percentage}%` : `-${dynamicPricing.percentage}%`}) Applied
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Outer Bento Grid */}
@@ -367,6 +375,7 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                   const effectiveType = getEffectiveServiceType(item);
                   const isDryCleanAvailable = item.dryCleanPrice !== null;
                   const isSteamIronAvailable = item.steamIronPrice !== null;
+                  const basePrice = getBasePriceForType(item, effectiveType);
                   const currentPrice = getPriceForType(item, effectiveType);
 
                   return (
@@ -389,9 +398,16 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                               {item.name}
                             </h4>
                           </div>
-                          <span className="text-sm sm:text-base font-black text-brand-primary dark:text-brand-accent font-mono bg-brand-primary/5 dark:bg-brand-accent/5 px-2.5 py-1 rounded-md shrink-0">
-                            ₹{currentPrice}{item.unit ? `/${item.unit}` : ''}
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isDynamicActive && currentPrice !== basePrice && (
+                              <span className="text-xs line-through text-slate-400 font-mono">
+                                ₹{basePrice}
+                              </span>
+                            )}
+                            <span className="text-sm sm:text-base font-black text-brand-primary dark:text-brand-accent font-mono bg-brand-primary/5 dark:bg-brand-accent/5 px-2.5 py-1 rounded-md shrink-0">
+                              ₹{currentPrice}{item.unit ? `/${item.unit}` : ''}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Service Selection buttons if both are available */}
@@ -605,6 +621,17 @@ export default function ServiceEstimator({ onOpenBooking }: ServiceEstimatorProp
                   ₹{subtotal}
                 </span>
               </div>
+
+              {isDynamicActive && (
+                <div className={`flex items-center justify-between text-xs font-mono font-bold px-3 py-1.5 rounded-lg ${
+                  dynamicPricing.mode === 'surcharge'
+                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                }`}>
+                  <span>{dynamicPricing.mode === 'surcharge' ? '⚡' : '🎉'} {dynamicPricing.label}</span>
+                  <span>{dynamicPricing.mode === 'surcharge' ? `+${dynamicPricing.percentage}%` : `-${dynamicPricing.percentage}%`}</span>
+                </div>
+              )}
               
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 font-medium leading-relaxed">
