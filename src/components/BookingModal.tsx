@@ -800,13 +800,24 @@ export default function BookingModal({
       const next = Math.max(0, Math.round((cur + amount) * 100) / 100);
       return { ...prev, [id]: next };
     });
+    if (id === 'laundry-wash-steam-iron' && amount > 0) {
+      setSelectedServices(prev => prev.includes('wash-iron') ? prev : [...prev, 'wash-iron']);
+    } else if (id === 'laundry-wash-fold' && amount > 0) {
+      setSelectedServices(prev => prev.includes('wash-fold') ? prev : [...prev, 'wash-fold']);
+    }
   };
 
   const setDirectQuantity = (id: string, value: number) => {
+    const nextVal = Math.max(0, Math.round(value * 100) / 100);
     setQuantities(prev => ({
       ...prev,
-      [id]: Math.max(0, Math.round(value * 100) / 100)
+      [id]: nextVal
     }));
+    if (id === 'laundry-wash-steam-iron' && nextVal > 0) {
+      setSelectedServices(prev => prev.includes('wash-iron') ? prev : [...prev, 'wash-iron']);
+    } else if (id === 'laundry-wash-fold' && nextVal > 0) {
+      setSelectedServices(prev => prev.includes('wash-fold') ? prev : [...prev, 'wash-fold']);
+    }
   };
 
   // Compute live price projection
@@ -2719,70 +2730,148 @@ export default function BookingModal({
 
                           {/* KG Slider / Quick buttons if laundry selected or category is laundry */}
                           {(selectedServices.includes('wash-fold') || selectedServices.includes('wash-iron') || activeSubCategory === 'laundry') && (
-                            <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/30 space-y-3">
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
-                                  <Shirt className="h-3.5 w-3.5" /> Wash & Fold Laundry Weight:
-                                </span>
-                                <span className="font-mono font-bold text-sm text-teal-700 dark:text-teal-300">
-                                  {quantities['wash-fold-kg'] || 0} KG
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity('wash-fold-kg', -1)}
-                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
-                                >
-                                  -1 KG
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity('wash-fold-kg', -0.1)}
-                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
-                                >
-                                  -0.1 KG
-                                </button>
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max="30"
-                                  step="0.1"
-                                  value={quantities['wash-fold-kg'] || 0}
-                                  onChange={(e) => setQuantities(prev => ({ ...prev, 'wash-fold-kg': parseFloat(e.target.value) || 0 }))}
-                                  className="flex-1 accent-teal-600"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity('wash-fold-kg', 0.1)}
-                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
-                                >
-                                  +0.1 KG
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity('wash-fold-kg', 1)}
-                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
-                                >
-                                  +1 KG
-                                </button>
-                              </div>
-                              <div className="flex flex-wrap gap-1.5 pt-1">
-                                {[1, 2, 3, 5, 8, 10].map(kg => (
-                                  <button
-                                    key={`instore-kg-btn-${kg}`}
-                                    type="button"
-                                    onClick={() => setQuantities(prev => ({ ...prev, 'wash-fold-kg': kg }))}
-                                    className={`px-2 py-1 rounded-md text-[10px] font-bold font-mono transition-colors cursor-pointer ${
-                                      quantities['wash-fold-kg'] === kg
-                                        ? 'bg-teal-600 text-white'
-                                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                                    }`}
-                                  >
-                                    {kg} KG
-                                  </button>
-                                ))}
-                              </div>
+                            <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/30 space-y-4">
+                              {/* Wash & Fold */}
+                              {(selectedServices.includes('wash-fold') || activeSubCategory === 'laundry' || (quantities['laundry-wash-fold'] || 0) > 0) && (
+                                <div className="space-y-2 pb-3 border-b border-teal-200/40 dark:border-teal-800/30">
+                                  <div className="flex justify-between items-center text-xs">
+                                    <span className="font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                                      <Shirt className="h-3.5 w-3.5" /> Wash & Fold (₹{adjustPrice(getSubservicePriceVal('laundry-wash-fold', 95))}/kg):
+                                    </span>
+                                    <span className="font-mono font-bold text-sm text-teal-700 dark:text-teal-300">
+                                      {quantities['laundry-wash-fold'] || 0} KG
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', -1)}
+                                      disabled={(quantities['laundry-wash-fold'] || 0) <= 0}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      -1 KG
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', -0.1)}
+                                      disabled={(quantities['laundry-wash-fold'] || 0) <= 0}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      -0.1 KG
+                                    </button>
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max="30"
+                                      step="0.1"
+                                      value={quantities['laundry-wash-fold'] || 0}
+                                      onChange={(e) => setDirectQuantity('laundry-wash-fold', parseFloat(e.target.value) || 0)}
+                                      className="flex-1 accent-teal-600"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', 0.1)}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                    >
+                                      +0.1 KG
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-fold', 1)}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                    >
+                                      +1 KG
+                                    </button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5 pt-1">
+                                    {[1, 2, 3, 5, 8, 10].map(kg => (
+                                      <button
+                                        key={`instore-wf-kg-${kg}`}
+                                        type="button"
+                                        onClick={() => setDirectQuantity('laundry-wash-fold', kg)}
+                                        className={`px-2 py-1 rounded-md text-[10px] font-bold font-mono transition-colors cursor-pointer ${
+                                          quantities['laundry-wash-fold'] === kg
+                                            ? 'bg-teal-600 text-white'
+                                            : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                        }`}
+                                      >
+                                        {kg} KG
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Wash & Steam Iron */}
+                              {(selectedServices.includes('wash-iron') || activeSubCategory === 'laundry' || (quantities['laundry-wash-steam-iron'] || 0) > 0) && (
+                                <div className="space-y-2">
+                                  <div className="flex justify-between items-center text-xs">
+                                    <span className="font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                                      👔 Wash & Steam Iron (₹{adjustPrice(getSubservicePriceVal('laundry-wash-steam-iron', 129))}/kg):
+                                    </span>
+                                    <span className="font-mono font-bold text-sm text-teal-700 dark:text-teal-300">
+                                      {quantities['laundry-wash-steam-iron'] || 0} KG
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-steam-iron', -1)}
+                                      disabled={(quantities['laundry-wash-steam-iron'] || 0) <= 0}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      -1 KG
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-steam-iron', -0.1)}
+                                      disabled={(quantities['laundry-wash-steam-iron'] || 0) <= 0}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      -0.1 KG
+                                    </button>
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max="30"
+                                      step="0.1"
+                                      value={quantities['laundry-wash-steam-iron'] || 0}
+                                      onChange={(e) => setDirectQuantity('laundry-wash-steam-iron', parseFloat(e.target.value) || 0)}
+                                      className="flex-1 accent-teal-600"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-steam-iron', 0.1)}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                    >
+                                      +0.1 KG
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity('laundry-wash-steam-iron', 1)}
+                                      className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                                    >
+                                      +1 KG
+                                    </button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5 pt-1">
+                                    {[1, 2, 3, 5, 8, 10].map(kg => (
+                                      <button
+                                        key={`instore-wsi-kg-${kg}`}
+                                        type="button"
+                                        onClick={() => setDirectQuantity('laundry-wash-steam-iron', kg)}
+                                        className={`px-2 py-1 rounded-md text-[10px] font-bold font-mono transition-colors cursor-pointer ${
+                                          quantities['laundry-wash-steam-iron'] === kg
+                                            ? 'bg-teal-600 text-white'
+                                            : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                        }`}
+                                      >
+                                        {kg} KG
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -3493,9 +3582,9 @@ export default function BookingModal({
                         ];
 
                         const activeKgList = kgConfigs.filter(cfg => 
+                          activeSubCategory === 'laundry' ||
                           selectedServices.includes(cfg.serviceKey) || 
-                          (quantities[cfg.itemId] !== undefined && quantities[cfg.itemId] > 0) ||
-                          (activeSubCategory === 'laundry' && selectedServices.length === 0)
+                          (quantities[cfg.itemId] !== undefined && quantities[cfg.itemId] > 0)
                         );
 
                         if (activeKgList.length === 0) return null;
