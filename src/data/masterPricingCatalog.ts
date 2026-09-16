@@ -65,19 +65,6 @@ export const MASTER_PRICING_CATALOG: MasterPricingItem[] = [
     description: 'Complete laundering paired with automated and manual steam crease relaxation'
   },
   {
-    id: 'laundry-dry-clean-kg',
-    name: 'Dry Clean (per kg)',
-    category: 'laundry',
-    categoryLabel: 'Laundry (Per KG)',
-    unit: 'per kg',
-    serviceType: 'Dry Cleaning',
-    defaultPrice: 199,
-    serviceKey: 'dry-cleaning',
-    estimatorItemId: 'laundry-dry-clean-kg',
-    estimatorDryCleanDefault: 199,
-    description: 'Eco-safe solvent dry cleaning measured conveniently per kg for suits, woolens, and delicate garments'
-  },
-  {
     id: 'laundry-steam-press-kg',
     name: 'Steam Press Only (per kg)',
     category: 'laundry',

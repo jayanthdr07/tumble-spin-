@@ -49,7 +49,7 @@ const AVAILABLE_SERVICES = [
   { id: 'test-gateway-service', name: '⚡ Gateway Test (₹1)', price: '₹1', description: 'Quick ₹1 live payment gateway checkout test.' },
   { id: 'wash-fold', name: 'Wash & Fold', price: '₹95/kg', description: 'Daily wear wash, tumble dry, and expert fold.' },
   { id: 'wash-iron', name: 'Wash & Steam Iron', price: '₹129/kg', description: 'Crisp, professionally laundered and steam-pressed garments.' },
-  { id: 'dry-cleaning', name: 'Dry Cleaning', price: '₹199/kg', description: 'Eco-safe solvent cleaning for suits, silk, sarees, and couture (Available per-kg or itemized).' },
+  { id: 'dry-cleaning', name: 'Dry Cleaning', price: '₹199/item', description: 'Eco-safe solvent cleaning for suits, silk, sarees, and couture.' },
   { id: 'steam-iron', name: 'Steam Ironing', price: '₹49/item', description: 'Delicate hand steam-pressing on soft hangers.' },
   { id: 'premium-care', name: 'Premium Garment Care', price: '₹399/item', description: 'Specialized stain attention and custom fiber conditioning.' },
   { id: 'shoe-spa', name: 'Shoe & Spa Care', price: '₹299/item', description: 'Deep clean, stain removal, leather conditioning, and sole restoration for footwear and handbags.' },
@@ -75,7 +75,6 @@ export const SUB_SERVICES: SubService[] = [
   // Laundry / KG (First Option)
   { id: 'laundry-wash-fold', name: 'Wash & Fold (per kg)', category: 'laundry', price: 95, serviceType: 'Wash & Fold' },
   { id: 'laundry-wash-steam-iron', name: 'Wash & Steam Iron (per kg)', category: 'laundry', price: 129, serviceType: 'Wash & Iron' },
-  { id: 'laundry-dry-clean-kg', name: 'Dry Clean (per kg)', category: 'laundry', price: 199, serviceType: 'Dry Clean' },
   { id: 'laundry-steam-press-kg', name: 'Steam Press Only (per kg)', category: 'laundry', price: 89, serviceType: 'Steam Iron' },
 
   // Kids Wear
@@ -238,11 +237,6 @@ export default function BookingModal({
         }
       } else if (service.id === 'laundry-wash-steam-iron') {
         const sOverride = customPrices?.services?.['wash-iron'];
-        if (sOverride !== undefined && sOverride !== null && sOverride !== '' && !isNaN(Number(sOverride))) {
-          return { ...service, price: Number(sOverride) };
-        }
-      } else if (service.id === 'laundry-dry-clean-kg') {
-        const sOverride = customPrices?.services?.['dry-cleaning'];
         if (sOverride !== undefined && sOverride !== null && sOverride !== '' && !isNaN(Number(sOverride))) {
           return { ...service, price: Number(sOverride) };
         }
@@ -716,12 +710,6 @@ export default function BookingModal({
           delete updated['laundry-wash-steam-iron'];
           return updated;
         });
-      } else if (id === 'dry-cleaning') {
-        setQuantities(prev => {
-          const updated = { ...prev };
-          delete updated['laundry-dry-clean-kg'];
-          return updated;
-        });
       }
     } else {
       setSelectedServices([...selectedServices, id]);
@@ -734,11 +722,6 @@ export default function BookingModal({
         setQuantities(prev => ({
           ...prev,
           'laundry-wash-steam-iron': prev['laundry-wash-steam-iron'] || 5
-        }));
-      } else if (id === 'dry-cleaning') {
-        setQuantities(prev => ({
-          ...prev,
-          'laundry-dry-clean-kg': prev['laundry-dry-clean-kg'] || 3
         }));
       }
     }
@@ -856,7 +839,7 @@ export default function BookingModal({
     if (!basePrice) return <span>{defaultPriceText}</span>;
 
     const adjusted = adjustPrice(basePrice);
-    const suffix = (id === 'wash-fold' || id === 'wash-iron' || id === 'dry-cleaning') ? '/kg' : (id === 'express' ? ' flat' : '/item');
+    const suffix = (id === 'wash-fold' || id === 'wash-iron') ? '/kg' : (id === 'express' ? ' flat' : '/item');
     const prefix = id === 'express' ? '+' : '';
 
     if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage && adjusted !== basePrice) {
@@ -880,7 +863,7 @@ export default function BookingModal({
     const basePrice = getServiceBasePrice(id, customPrices, liveCatalogItems);
     if (!basePrice) return defaultPriceText;
     const adjusted = adjustPrice(basePrice);
-    if (id === 'wash-fold' || id === 'wash-iron' || id === 'dry-cleaning') return `₹${adjusted}/kg`;
+    if (id === 'wash-fold' || id === 'wash-iron') return `₹${adjusted}/kg`;
     if (id === 'express') return `+₹${adjusted} flat`;
     return `₹${adjusted}/item`;
   };
@@ -3506,14 +3489,6 @@ export default function BookingModal({
                             icon: '👔',
                             defaultRate: 129,
                             desc: 'Select or type precise kilograms for wash & steam iron (e.g. 0.5 kg, 1.5 kg, 3 kg, 5 kg)'
-                          },
-                          {
-                            serviceKey: 'dry-cleaning',
-                            itemId: 'laundry-dry-clean-kg',
-                            title: 'Dry Clean (Per KG) Weight Estimate',
-                            icon: '✨',
-                            defaultRate: 199,
-                            desc: 'Select or type precise kilograms for per-kg dry cleaning (e.g. 1 kg, 2.5 kg, 5 kg)'
                           }
                         ];
 
