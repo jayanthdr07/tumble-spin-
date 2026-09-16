@@ -195,7 +195,7 @@ export default function Hero({ onOpenBooking, heroImage }: HeroProps) {
                     id="hero-book-pickup-btn"
                   >
                     <Calendar className="h-4.5 w-4.5" />
-                    Book Doorstep Pickup
+                    Create Order
                   </button>
                   
                   <a

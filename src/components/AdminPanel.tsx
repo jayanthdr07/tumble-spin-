@@ -7,7 +7,7 @@ import {
   Search, Settings, Store, Receipt, Download, ShoppingCart, Info, Minus,
   Printer, Package, Users, TrendingUp, Sun, Moon,
   Server, Key, Send, Eye, EyeOff, HelpCircle, AlertTriangle, Copy, FileSpreadsheet,
-  Edit3
+  Edit3, Table, Columns, Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
@@ -17,12 +17,13 @@ import { useBusinessInfo, setBusinessInfo, getBusinessInfo, BusinessInfo } from 
 import { downloadInvoice } from '../utils/invoiceGenerator';
 import { exportCustomersToExcel, printCustomerDirectory, CustomerSummary } from '../utils/customerExcelExporter';
 import { db } from '../lib/firebase';
-import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { doc, deleteDoc, setDoc, collection, getDocs, onSnapshot } from 'firebase/firestore';
 
 import { ESTIMATOR_ITEMS } from './ServiceEstimator';
 import { SUB_SERVICES } from './BookingModal';
 import MasterPricingManager from './MasterPricingManager';
 import AdminOrderItemEditorModal, { OrderItem } from './AdminOrderItemEditorModal';
+import OrderEditor from './OrderEditor';
 
 import HERO_IMAGE_PATH from '../assets/images/luxe_laundry_hero_1782710394352.jpg';
 import logoImg from '../assets/images/tumblespin_header_logo.png';
@@ -180,6 +181,7 @@ export default function AdminPanel({
   const [orders, setOrders] = useState<OrderData[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderData | null>(null);
   const [editingOrderForItems, setEditingOrderForItems] = useState<OrderData | null>(null);
+  const [ordersViewMode, setOrdersViewMode] = useState<'table' | 'split'>('table');
   const [activeTab, setActiveTab] = useState<'bookings' | 'promo' | 'pricing' | 'profile' | 'business' | 'customers' | 'analytics' | 'deleted_orders' | 'webhooks'>('bookings');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
@@ -451,7 +453,8 @@ export default function AdminPanel({
       'house-blanket-double': { name: 'Blanket Double Ply', stock: 10, available: true },
       'shoes-sneakers': { name: 'Sports / Canvas Sneakers', stock: 12, available: true },
       'laundry-wash-fold': { name: 'Wash & Fold (per kg)', stock: 100, available: true },
-      'laundry-wash-steam-iron': { name: 'Wash & Steam Iron (per kg)', stock: 80, available: true }
+      'laundry-wash-steam-iron': { name: 'Wash & Steam Iron (per kg)', stock: 80, available: true },
+      'laundry-dry-clean-kg': { name: 'Dry Clean (per kg)', stock: 80, available: true }
     };
     localStorage.setItem('tumblespin_inventory', JSON.stringify(defaults));
     return defaults;
@@ -902,8 +905,8 @@ export default function AdminPanel({
     }, 4000);
   };
 
-  // Load orders from localStorage
-  const loadOrders = () => {
+  // Load orders from localStorage and sync with Firestore
+  const loadOrders = async () => {
     const stored = localStorage.getItem('tumblespin_orders');
     const deletedStr = localStorage.getItem('tumblespin_deleted_orders') || '[]';
     let deletedIds: string[] = [];
@@ -914,37 +917,60 @@ export default function AdminPanel({
       }
     } catch (e) {}
 
+    // First load from localStorage for zero-latency initial UI
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as (OrderData & { isMock?: boolean })[];
-        // Filter out any orders that have been deleted
         const filteredFromDeleted = parsed.filter(o => o && o.orderId && !deletedIds.includes(o.orderId));
-
-        // Check if we have any real user-created orders
         const hasRealOrders = filteredFromDeleted.some(o => !o.isMock);
         if (hasRealOrders) {
-          // Permanently purge any pre-seeded mock orders!
           const realOnly = filteredFromDeleted.filter(o => !o.isMock);
-          if (realOnly.length !== parsed.length) {
-            localStorage.setItem('tumblespin_orders', JSON.stringify(realOnly));
-            setOrders(realOnly);
-            window.dispatchEvent(new Event('storage'));
-            return;
+          setOrders(realOnly);
+        } else {
+          setOrders(filteredFromDeleted);
+        }
+      } catch (err) {
+        console.error('Error parsing local orders:', err);
+      }
+    }
+
+    // Now fetch all active orders from Firestore
+    try {
+      const ordersCol = collection(db, 'orders');
+      const snapshot = await getDocs(ordersCol);
+      const fsOrders: OrderData[] = [];
+
+      snapshot.forEach(docSnap => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as OrderData;
+          const ordId = data.orderId || docSnap.id;
+          if (ordId && !deletedIds.includes(ordId) && !(data as any).isMock) {
+            fsOrders.push({
+              ...data,
+              orderId: ordId
+            });
           }
         }
-        
-        if (filteredFromDeleted.length !== parsed.length) {
-          localStorage.setItem('tumblespin_orders', JSON.stringify(filteredFromDeleted));
-          setOrders(filteredFromDeleted);
-          window.dispatchEvent(new Event('storage'));
-          return;
-        }
-        setOrders(filteredFromDeleted);
-      } catch (err) {
-        console.error(err);
+      });
+
+      if (fsOrders.length > 0) {
+        // Sort with newest orders first
+        fsOrders.sort((a, b) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+        setOrders(fsOrders);
+        localStorage.setItem('tumblespin_orders', JSON.stringify(fsOrders));
+        window.dispatchEvent(new Event('storage'));
+        return;
       }
-    } else {
-      // Seed initial dummy reference orders so the screen isn't dry, with 'isMock: true' tag
+    } catch (fsErr) {
+      console.warn('Direct Firestore fetch fallback to local cache:', fsErr);
+    }
+
+    // If neither local real orders nor Firestore returned real orders and nothing is stored
+    if (!stored) {
       const initialSeed: (OrderData & { isMock: boolean })[] = [
         {
           orderId: 'TS-2026-101',
@@ -1009,8 +1035,53 @@ export default function AdminPanel({
   };
 
   useEffect(() => {
-    if (isOpen) {
-      loadOrders();
+    if (!isOpen) return;
+
+    loadOrders();
+
+    // Attach real-time snapshot listener on Firestore active orders
+    try {
+      const ordersCol = collection(db, 'orders');
+      const unsubscribe = onSnapshot(ordersCol, (snapshot) => {
+        const deletedStr = localStorage.getItem('tumblespin_deleted_orders') || '[]';
+        let deletedIds: string[] = [];
+        try {
+          const parsedDeleted = JSON.parse(deletedStr);
+          if (Array.isArray(parsedDeleted)) {
+            deletedIds = parsedDeleted.map((o: any) => o.orderId).filter(Boolean);
+          }
+        } catch (e) {}
+
+        const fetchedOrders: OrderData[] = [];
+        snapshot.forEach((docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data() as OrderData;
+            const ordId = data.orderId || docSnap.id;
+            if (ordId && !deletedIds.includes(ordId) && !(data as any).isMock) {
+              fetchedOrders.push({
+                ...data,
+                orderId: ordId
+              });
+            }
+          }
+        });
+
+        if (fetchedOrders.length > 0) {
+          fetchedOrders.sort((a, b) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+          });
+          setOrders(fetchedOrders);
+          localStorage.setItem('tumblespin_orders', JSON.stringify(fetchedOrders));
+        }
+      }, (err) => {
+        console.warn('Firestore active orders listener notice:', err);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn('Failed to attach Firestore snapshot listener:', err);
     }
   }, [isOpen]);
 
@@ -1306,12 +1377,38 @@ export default function AdminPanel({
 
   // Derived state: Filtered Orders based on search query, status filter, and date filter
   const filteredOrders = orders.filter((order) => {
-    const matchesSearch = 
-      !adminSearchQuery.trim() ||
-      order.fullName.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
-      order.orderId.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
-      order.email.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
-      order.phone.toLowerCase().includes(adminSearchQuery.toLowerCase());
+    if (!order) return false;
+
+    const q = adminSearchQuery.trim().toLowerCase();
+    let matchesSearch = true;
+    if (q) {
+      const fullName = String(order.fullName || '').toLowerCase();
+      const orderId = String(order.orderId || '').toLowerCase();
+      const email = String(order.email || '').toLowerCase();
+      const phone = String(order.phone || '').toLowerCase();
+      const address = String(order.address || (order as any).pickupAddress || '').toLowerCase();
+      const status = String(order.status || '').toLowerCase();
+      const orderStatus = String(order.orderStatus || '').toLowerCase();
+      const paymentMethod = String(order.paymentMethod || '').toLowerCase();
+      const specialInstructions = String(order.specialInstructions || '').toLowerCase();
+      const services = Array.isArray(order.selectedServices) ? order.selectedServices.join(' ').toLowerCase() : '';
+      const subServices = Array.isArray(order.subServices) 
+        ? order.subServices.map((s: any) => `${s?.name || ''} ${s?.category || ''} ${s?.serviceType || ''}`).join(' ').toLowerCase() 
+        : '';
+
+      matchesSearch = 
+        fullName.includes(q) ||
+        orderId.includes(q) ||
+        email.includes(q) ||
+        phone.includes(q) ||
+        address.includes(q) ||
+        status.includes(q) ||
+        orderStatus.includes(q) ||
+        paymentMethod.includes(q) ||
+        specialInstructions.includes(q) ||
+        services.includes(q) ||
+        subServices.includes(q);
+    }
 
     const matchesStatus = adminStatusFilter === 'all' || order.status === adminStatusFilter;
 
@@ -1332,7 +1429,7 @@ export default function AdminPanel({
       !adminDateFilter || 
       order.pickupDate === adminDateFilter || 
       order.deliveryDate === adminDateFilter ||
-      order.createdAt?.startsWith(adminDateFilter);
+      (typeof order.createdAt === 'string' && order.createdAt.startsWith(adminDateFilter));
 
     return matchesSearch && matchesStatus && matchesGroup && matchesDate;
   });
@@ -1852,7 +1949,7 @@ export default function AdminPanel({
                         >
                           <div className="flex justify-between items-start w-full">
                             <span className="text-[9px] font-bold uppercase tracking-wider font-mono">Total Bookings</span>
-                            <ShoppingBag className="h-4 w-4 opacity-75" />
+                            <ShoppingBag className="h-3 w-3 opacity-60" />
                           </div>
                           <div className="mt-2">
                             <span className="text-2xl font-black font-mono">{orders.length}</span>
@@ -3332,11 +3429,17 @@ export default function AdminPanel({
                 {activeTab === 'customers' && (() => {
                   const allCustomers = computeCustomerDirectory(orders);
                   const filteredCustomers = allCustomers.filter(c => {
-                    const q = customerSearchQuery.toLowerCase();
-                    return c.fullName.toLowerCase().includes(q) || 
-                           c.email.toLowerCase().includes(q) || 
-                           c.phone.toLowerCase().includes(q) ||
-                           c.address.toLowerCase().includes(q);
+                    if (!c) return false;
+                    const q = customerSearchQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    const fullName = String(c.fullName || '').toLowerCase();
+                    const email = String(c.email || '').toLowerCase();
+                    const phone = String(c.phone || '').toLowerCase();
+                    const address = String(c.address || '').toLowerCase();
+                    return fullName.includes(q) || 
+                           email.includes(q) || 
+                           phone.includes(q) ||
+                           address.includes(q);
                   });
 
                   const selectedCustomer = selectedCustomerKey ? allCustomers.find(c => c.key === selectedCustomerKey) || null : null;

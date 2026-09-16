@@ -91,6 +91,8 @@ const SUB_SERVICES_MAP: Record<string, number> = {
   'bags-spa-care': 590,
   'laundry-wash-fold': 95,
   'laundry-wash-steam-iron': 129,
+  'laundry-dry-clean-kg': 199,
+  'laundry-steam-press-kg': 89,
 };
 
 // Re-computes the order price on the backend to avoid trusting the client total
@@ -777,13 +779,11 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
         createdAt: new Date().toISOString()
       };
 
-      // Save initial order document to Firestore DB
-      try {
-        await withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 10000);
-        await withTimeout(setDoc(doc(db, 'orders', merchantTransactionId), newOrderDoc), 10000);
-        
-        // Log initial payment attempt
-        await withTimeout(setDoc(doc(db, 'payment_attempts', merchantTransactionId), {
+      // Save initial order document to Firestore DB (parallel non-blocking with resilient safety)
+      Promise.allSettled([
+        withTimeout(setDoc(doc(db, 'orders', orderId), newOrderDoc), 3500),
+        withTimeout(setDoc(doc(db, 'orders', merchantTransactionId), newOrderDoc), 3500),
+        withTimeout(setDoc(doc(db, 'payment_attempts', merchantTransactionId), {
           merchantTransactionId,
           orderId,
           amount: finalTotal,
@@ -791,12 +791,12 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
           gateway: 'cashfree',
           status: 'INITIATED',
           createdAt: new Date().toISOString()
-        }), 10000);
-
+        }), 3500)
+      ]).then(() => {
         console.log(`[Cashfree Backend] Order ${orderId} (${merchantTransactionId}) saved to Firestore DB.`);
-      } catch (dbErr) {
+      }).catch((dbErr) => {
         console.warn('Backend database write warning (resilient state active):', dbErr);
-      }
+      });
 
       // Create Cashfree Order / Session via Cashfree PG REST API
       const cfOrderPayload = {
@@ -822,6 +822,9 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
       let fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiIntent)}`;
 
       try {
+        const cfAbortController = new AbortController();
+        const cfTimeout = setTimeout(() => cfAbortController.abort(), 3500);
+
         const cfResponse = await fetch(`${CASHFREE_HOST}/orders`, {
           method: 'POST',
           headers: {
@@ -830,8 +833,10 @@ function verifyCashfreeWebhookSignature(rawBody: string, timestamp: string, sign
             'x-client-secret': CASHFREE_SECRET_KEY,
             'x-api-version': '2023-08-01'
           },
-          body: JSON.stringify(cfOrderPayload)
+          body: JSON.stringify(cfOrderPayload),
+          signal: cfAbortController.signal
         });
+        clearTimeout(cfTimeout);
 
         const cfResData: any = await cfResponse.json();
 

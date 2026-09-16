@@ -1,7 +1,7 @@
 /**
  * Robust fetch utility with timeout and standard header defaults
  */
-export async function robustFetch(url: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+export async function robustFetch(url: string, options: RequestInit = {}, timeoutMs = 7000): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
