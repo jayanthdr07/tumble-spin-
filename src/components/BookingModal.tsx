@@ -490,14 +490,7 @@ export default function BookingModal({
         garmentCareOption: bookingDetails.garmentCareOption || 'standard',
         specialInstructions: bookingDetails.specialInstructions || '',
         selectedServices,
-        subServices: getSelectedItemsWithDetails().map(item => ({
-          id: item.id,
-          name: item.name,
-          category: item.category,
-          price: adjustPrice(item.price),
-          quantity: item.quantity,
-          serviceType: item.serviceType
-        })),
+        subServices: getFinalItemizedList(),
         totalPrice: getGrandTotal(),
         paymentMethod: 'PhonePe Payment Gateway',
         paymentDetails: {
@@ -879,8 +872,112 @@ export default function BookingModal({
     return `₹${adjusted}/item`;
   };
 
+  // Definitive final itemized breakdown of all items and charges
+  const getFinalItemizedList = (): Array<{
+    id: string;
+    name: string;
+    category: string;
+    price: number;
+    quantity: number;
+    serviceType: string;
+  }> => {
+    const rawSelectedItems = getSelectedItemsWithDetails();
+    const list: Array<{
+      id: string;
+      name: string;
+      category: string;
+      price: number;
+      quantity: number;
+      serviceType: string;
+    }> = [];
+
+    // 1. All selected items with final adjusted unit prices
+    if (rawSelectedItems.length > 0) {
+      rawSelectedItems.forEach(item => {
+        list.push({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          price: adjustPrice(item.price),
+          quantity: item.quantity,
+          serviceType: item.serviceType
+        });
+      });
+    }
+
+    // 2. Express delivery (if selected)
+    if (selectedServices.includes('express')) {
+      list.push({
+        id: 'express-valet',
+        name: 'Express Priority Valet (24h Delivery)',
+        category: 'express',
+        price: adjustPrice(getExpressPriceVal()),
+        quantity: 1,
+        serviceType: 'Priority Valet'
+      });
+    }
+
+    // 3. Test gateway service
+    if (selectedServices.includes('test-gateway-service') || selectedServices.includes('test-gateway-1rs')) {
+      list.push({
+        id: 'test-gateway-1rs',
+        name: 'Test Payment Verification',
+        category: 'test',
+        price: 1,
+        quantity: 1,
+        serviceType: 'Gateway Test'
+      });
+    }
+
+    // 4. If no items selected yet service modules are chosen
+    if (list.length === 0 && selectedServices.length > 0) {
+      if (selectedServices.includes('hassle-free')) {
+        list.push({
+          id: 'hassle-free-service',
+          name: 'Hassle-Free Doorstep Valet (Weighed at Pickup)',
+          category: 'laundry',
+          price: 0,
+          quantity: 1,
+          serviceType: 'Doorstep Valet'
+        });
+      } else {
+        const serviceNames = selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ');
+        list.push({
+          id: 'booking-deposit',
+          name: bookingType === 'instore'
+            ? (serviceNames || 'Walk-in In-Store Garment Care')
+            : 'Slot Reservation Deposit (100% Credited on Weighed Bill)',
+          category: 'deposit',
+          price: 99,
+          quantity: 1,
+          serviceType: bookingType === 'instore' ? 'In-Store Care' : 'Reservation Deposit'
+        });
+      }
+    }
+
+    // 5. Membership discount (if applicable)
+    const activeSub = getActiveMembership();
+    if (selectedPaymentMethod === 'membership' && activeSub && (activeSub.packageType === 'SMART' || activeSub.packageType === 'SILVER')) {
+      const currentSubtotal = list.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const discountPct = activeSub.packageType === 'SMART' ? 10 : 20;
+      const discountAmt = Math.round((currentSubtotal * discountPct) / 100);
+      if (discountAmt > 0) {
+        list.push({
+          id: 'membership-benefit-discount',
+          name: `Prepaid ${activeSub.packageType} Member Privilege (${discountPct}% Off)`,
+          category: 'discount',
+          price: -discountAmt,
+          quantity: 1,
+          serviceType: 'Membership Benefit'
+        });
+      }
+    }
+
+    return list;
+  };
+
   const getSubservicesTotal = () => {
-    return getSelectedItemsWithDetails().reduce((sum, item) => sum + (adjustPrice(item.price) * item.quantity), 0);
+    return getFinalItemizedList().reduce((sum, item) => sum + (item.price * item.quantity), 0);
   };
 
   const getExpressSurcharge = () => {
@@ -889,49 +986,36 @@ export default function BookingModal({
 
   // Raw base total without dynamic pricing adjustments or discounts
   const getRawBaseTotal = () => {
-    let rawSum = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0)
-      + (selectedServices.includes('express') ? getExpressPriceVal() : 0);
-    
-    if (selectedServices.includes('test-gateway-service') || selectedServices.includes('test-gateway-1rs')) {
-      rawSum = Math.max(1, rawSum);
-    }
-
-    if (rawSum === 0 && selectedServices.length > 0) {
-      return 99; // Nominal refundable booking deposit
-    }
-    return rawSum;
+    return getGrandTotal();
   };
 
   // Dynamic pricing adjustment (Surge (+) or Promo Discount (-))
   const getDynamicPricingAdjustment = () => {
-    const rawBase = getRawBaseTotal();
-    if (!dynamicPricing || dynamicPricing.mode === 'none' || !dynamicPricing.percentage || rawBase === 0) {
-      return 0;
-    }
-    const amt = Math.round((rawBase * dynamicPricing.percentage) / 100);
-    return dynamicPricing.mode === 'surcharge' ? amt : -amt;
+    return 0;
   };
 
   // Base total after surge/promo dynamic pricing applied
   const getBaseAfterDynamicPricing = () => {
-    return Math.max(0, getRawBaseTotal() + getDynamicPricingAdjustment());
+    return getGrandTotal();
   };
 
   // Payment method or active membership discount amount
   const getPaymentDiscount = () => {
-    const base = getBaseAfterDynamicPricing();
     const activeSub = getActiveMembership();
-
     if (selectedPaymentMethod === 'membership' && activeSub && (activeSub.packageType === 'SMART' || activeSub.packageType === 'SILVER')) {
+      const items = getFinalItemizedList().filter(i => i.id !== 'membership-benefit-discount');
+      const sum = items.reduce((total, item) => total + (item.price * item.quantity), 0);
       const discountPercentage = activeSub.packageType === 'SMART' ? 10 : 20;
-      return Math.round((base * discountPercentage) / 100);
+      return Math.round((sum * discountPercentage) / 100);
     }
-
     return 0;
   };
 
   const getGrandTotal = () => {
-    return Math.max(0, getBaseAfterDynamicPricing() - getPaymentDiscount());
+    if (selectedServices.includes('hassle-free')) return 0;
+    const items = getFinalItemizedList();
+    const sum = items.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return Math.max(0, sum);
   };
 
   const shouldSkipStep3 = () => {
@@ -1094,23 +1178,7 @@ export default function BookingModal({
         garmentCareOption: bookingDetails.garmentCareOption || 'standard',
         specialInstructions: bookingDetails.specialInstructions?.trim() || '',
         selectedServices: Array.from(new Set([...selectedServices, 'Walk-in Counter Service'])),
-        subServices: selectedItems.length > 0 ? selectedItems.map(item => ({
-          id: item.id,
-          name: item.name,
-          category: item.category,
-          price: adjustPrice(item.price),
-          quantity: item.quantity,
-          serviceType: item.serviceType
-        })) : [
-          {
-            id: 'instore-counter-service',
-            name: selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ') || 'Walk-in Garment Care',
-            category: 'laundry',
-            price: grandTotal,
-            quantity: 1,
-            serviceType: 'In-Store Counter Service'
-          }
-        ],
+        subServices: getFinalItemizedList(),
         totalPrice: grandTotal,
         status: 'Order Confirmed',
         orderStatus: 'Confirmed',
@@ -1218,15 +1286,8 @@ export default function BookingModal({
           garmentCareOption: bookingDetails.garmentCareOption || 'standard',
           specialInstructions: bookingDetails.specialInstructions || '',
           selectedServices,
-          subServices: isHassleFree ? [] : getSelectedItemsWithDetails().map(item => ({
-            id: item.id,
-            name: item.name,
-            category: item.category,
-            price: adjustPrice(item.price),
-            quantity: item.quantity,
-            serviceType: item.serviceType
-          })),
-          totalPrice: 0,
+          subServices: getFinalItemizedList(),
+          totalPrice: grandTotal,
           status: 'Confirmed',
           orderStatus: 'Pending',
           smsOptIn: smsOptIn,
@@ -1298,20 +1359,7 @@ export default function BookingModal({
           garmentCareOption: bookingDetails.garmentCareOption || 'standard',
           specialInstructions: bookingDetails.specialInstructions || '',
           selectedServices,
-          subServices: Object.entries(quantities)
-            .filter(([_, qty]) => (qty as number) > 0)
-            .map(([id, qty]) => {
-              const matchedService = effectiveSubServices.find(s => s.id === id);
-              let price = matchedService?.price || 0;
-              if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage) {
-                if (dynamicPricing.mode === 'surcharge') {
-                  price = Math.round(price + (price * dynamicPricing.percentage) / 100);
-                } else if (dynamicPricing.mode === 'discount') {
-                  price = Math.round(price - (price * dynamicPricing.percentage) / 100);
-                }
-              }
-              return { id, name: id.replace('-', ' '), category: id.split('-')[0], price, quantity: qty };
-            }),
+          subServices: getFinalItemizedList(),
           totalPrice: grandTotal,
           status: 'Confirmed',
           orderStatus: 'Pending',
@@ -1429,14 +1477,7 @@ export default function BookingModal({
         garmentCareOption: bookingDetails.garmentCareOption || 'standard',
         specialInstructions: bookingDetails.specialInstructions || '',
         selectedServices,
-        subServices: getSelectedItemsWithDetails().map(item => ({
-          id: item.id,
-          name: item.name,
-          category: item.category,
-          price: adjustPrice(item.price),
-          quantity: item.quantity,
-          serviceType: item.serviceType
-        })),
+        subServices: getFinalItemizedList(),
         totalPrice: grandTotal,
         status: 'Payment Pending',
         orderStatus: 'Pending',
@@ -1504,20 +1545,7 @@ export default function BookingModal({
           garmentCareOption: bookingDetails.garmentCareOption || 'standard',
           specialInstructions: bookingDetails.specialInstructions || '',
           selectedServices,
-          subServices: Object.entries(quantities)
-            .filter(([_, qty]) => (qty as number) > 0)
-            .map(([id, qty]) => {
-              const matchedService = effectiveSubServices.find(s => s.id === id);
-              let price = matchedService?.price || 0;
-              if (dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage) {
-                if (dynamicPricing.mode === 'surcharge') {
-                  price = Math.round(price + (price * dynamicPricing.percentage) / 100);
-                } else if (dynamicPricing.mode === 'discount') {
-                  price = Math.round(price - (price * dynamicPricing.percentage) / 100);
-                }
-              }
-              return { id, name: id.replace('-', ' '), category: id.split('-')[0], price, quantity: qty };
-            }),
+          subServices: getFinalItemizedList(),
           totalPrice: grandTotal,
           status: 'Payment Pending',
           orderStatus: 'Pending',
@@ -1739,7 +1767,7 @@ export default function BookingModal({
   };
 
   const getNotificationUrls = () => {
-    const servicesText = selectedServices.map(id => AVAILABLE_SERVICES.find(s => s.id === id)?.name).join(', ');
+    const servicesText = selectedServices.map(id => AVAILABLE_SERVICES.find(s => s.id === id)?.name).filter(Boolean).join(', ');
     const formattedPickup = formatDate(bookingDetails.pickupDate || '');
     const formattedDelivery = formatDate(bookingDetails.deliveryDate || '');
     const careText = bookingDetails.garmentCareOption === 'standard' 
@@ -1750,11 +1778,48 @@ export default function BookingModal({
 
     const itemsSummary = getSelectedItemsWithDetails().map(i => `${i.name} (x${i.quantity})`).join(', ');
 
-    const whatsappText = `✨ *TUMBLE SPIN - EXCLUSIVE CARE RESERVATION* ✨\n\n*Order:* ${generatedOrderId || 'TS-New'}\n*Client:* ${bookingDetails.fullName}\n*Phone:* ${bookingDetails.phone}\n*Service Modules:* ${servicesText}\n*Items Selected:* ${itemsSummary}\n*Total Invoice Est:* ₹${getGrandTotal()}\n*Valet Pickup Slot:* ${formattedPickup} @ ${bookingDetails.pickupTimeSlot}\n*Fresh Return Slot:* ${formattedDelivery} @ ${bookingDetails.deliveryTimeSlot}\n*Care Detergent:* ${careText}\n*Address:* ${bookingDetails.address}\n\n_Our garment specialists have queued this order for priority processing!_`;
+    // Normalize and clean client's phone number entered during booking
+    const rawClientPhone = (bookingDetails.phone || '').replace(/\D/g, '');
+    let clientPhoneWithCountry = rawClientPhone;
+    if (rawClientPhone.length === 10) {
+      clientPhoneWithCountry = `91${rawClientPhone}`;
+    } else if (rawClientPhone.length === 11 && rawClientPhone.startsWith('0')) {
+      clientPhoneWithCountry = `91${rawClientPhone.slice(1)}`;
+    } else if (rawClientPhone.length === 12 && rawClientPhone.startsWith('91')) {
+      clientPhoneWithCountry = rawClientPhone;
+    }
+
+    const isInstore = bookingType === 'instore';
+
+    // Target Phone: For in-store bookings, message MUST go directly to the client's number entered during booking!
+    const targetPhone = isInstore && clientPhoneWithCountry 
+      ? clientPhoneWithCountry 
+      : `91${(businessInfo.phone || '9606032491').replace(/\D/g, '')}`;
+
+    const instoreInvoiceText = `🧾 *TUMBLE SPIN - DIGITAL INVOICE & RECEIPT* 🧾\n\n` +
+      `Hello *${bookingDetails.fullName || 'Valued Customer'}*,\n` +
+      `Thank you for visiting Tumble Spin! Here is your in-store order invoice and receipt:\n\n` +
+      `📋 *Invoice / Order ID:* ${generatedOrderId || 'TS-New'}\n` +
+      `📅 *Date:* ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}\n` +
+      `✨ *Services:* ${servicesText || 'In-Store Garment Care'}\n` +
+      `👕 *Items:* ${itemsSummary || 'Counter Drop-off'}\n` +
+      `🌿 *Care Type:* ${careText}\n` +
+      `💰 *Total Amount:* ₹${getGrandTotal()}\n` +
+      `💳 *Payment Method:* ${bookingType === 'instore' ? 'UPI / Counter Payment' : (paymentMode === 'cod' ? 'UPI / Dynamic QR' : 'Paid Online')}\n\n` +
+      `📍 *Store Location:* #6, 80 feet road, Kengeri Ring Rd, Mariyappana Palya, Bengaluru - 560056\n` +
+      `📞 *Store Helpline:* +91 ${businessInfo.phone || '96060 32491'}\n\n` +
+      `_Your garments are under specialist care. We will notify you once they are ready for pickup!_ ✨`;
+
+    const doorstepWhatsappText = `✨ *TUMBLE SPIN - EXCLUSIVE CARE RESERVATION* ✨\n\n*Order:* ${generatedOrderId || 'TS-New'}\n*Client:* ${bookingDetails.fullName}\n*Phone:* ${bookingDetails.phone}\n*Service Modules:* ${servicesText}\n*Items Selected:* ${itemsSummary}\n*Total Invoice Est:* ₹${getGrandTotal()}\n*Valet Pickup Slot:* ${formattedPickup} @ ${bookingDetails.pickupTimeSlot}\n*Fresh Return Slot:* ${formattedDelivery} @ ${bookingDetails.deliveryTimeSlot}\n*Care Detergent:* ${careText}\n*Address:* ${bookingDetails.address}\n\n_Our garment specialists have queued this order for priority processing!_`;
+
+    const whatsappText = isInstore ? instoreInvoiceText : doorstepWhatsappText;
 
     return {
-      whatsappUrl: `https://wa.me/91${businessInfo.phone}?text=${encodeURIComponent(whatsappText)}`,
-      mailtoUrl: `mailto:${businessInfo.email}?subject=Tumble Spin Reservation ${generatedOrderId || 'TS-New'}&body=${encodeURIComponent(whatsappText)}`
+      targetPhone,
+      clientPhoneDisplay: bookingDetails.phone || '',
+      isInstore,
+      whatsappUrl: `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappText)}`,
+      mailtoUrl: `mailto:${isInstore && bookingDetails.email ? bookingDetails.email : businessInfo.email}?subject=Tumble Spin Reservation ${generatedOrderId || 'TS-New'}&body=${encodeURIComponent(whatsappText)}`
     };
   };
 
@@ -1773,23 +1838,7 @@ export default function BookingModal({
       garmentCareOption: bookingDetails.garmentCareOption || 'standard',
       specialInstructions: bookingDetails.specialInstructions || '',
       selectedServices,
-      subServices: selectedItems.length > 0 ? selectedItems.map(item => ({
-        id: item.id,
-        name: item.name,
-        category: item.category,
-        price: adjustPrice(item.price),
-        quantity: item.quantity,
-        serviceType: item.serviceType
-      })) : [
-        {
-          id: 'instore-counter-service',
-          name: selectedServices.map(s => AVAILABLE_SERVICES.find(as => as.id === s)?.name || s).join(', ') || 'Walk-in Garment Care',
-          category: 'laundry',
-          price: getGrandTotal(),
-          quantity: 1,
-          serviceType: 'In-Store Counter Service'
-        }
-      ],
+      subServices: getFinalItemizedList(),
       totalPrice: getGrandTotal(),
       paymentMethod: bookingType === 'instore' ? 'UPI / Dynamic QR' : (paymentMode === 'cod' ? 'UPI / Dynamic QR' : 'Online Payment (Disabled)'),
       dynamicPricing: dynamicPricing && dynamicPricing.mode !== 'none' ? {
@@ -2061,15 +2110,17 @@ export default function BookingModal({
                   </div>
 
                   {/* Notification routing URLs */}
-                  {notifyWhatsApp && (
+                  {(notifyWhatsApp || bookingType === 'instore') && (
                     <div className="mt-6 p-5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 max-w-md w-full text-center space-y-3.5 shadow-xs">
                       <div>
                         <p className="text-xs font-bold text-slate-800 dark:text-emerald-400 flex items-center justify-center gap-1.5">
                           <MessageSquare className="h-4 w-4 fill-emerald-500 text-emerald-500 animate-bounce" />
-                          Pre-filled WhatsApp Notification Ready!
+                          {bookingType === 'instore' ? 'Client WhatsApp Invoice Ready!' : 'Pre-filled WhatsApp Notification Ready!'}
                         </p>
                         <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          Click the button below to message our dispatch hub directly with your valet details.
+                          {bookingType === 'instore'
+                            ? `Click the button below to send this digital invoice directly to the client's number (${bookingDetails.phone || 'entered number'}).`
+                            : 'Click the button below to message our dispatch hub directly with your valet details.'}
                         </p>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-2.5 justify-center">
@@ -2078,9 +2129,10 @@ export default function BookingModal({
                           target="_blank"
                           rel="noreferrer"
                           className="flex items-center justify-center gap-2 rounded-full bg-[#25D366] text-white px-6 py-2.5 text-xs font-extrabold uppercase tracking-wider shadow-md hover:scale-[1.02] transition-all"
+                          id="send-invoice-whatsapp-btn"
                         >
                           <MessageSquare className="h-4 w-4 fill-current text-white animate-pulse" />
-                          Send WhatsApp Order Details
+                          {bookingType === 'instore' ? 'Send Invoice via WhatsApp' : 'Send WhatsApp Order Details'}
                         </a>
                       </div>
                     </div>
@@ -3435,8 +3487,8 @@ export default function BookingModal({
                                 Selected Garments & Services (Same Catalog Rates)
                               </div>
                               <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[220px] overflow-y-auto pr-1">
-                                {getSelectedItemsWithDetails().length > 0 ? (
-                                  getSelectedItemsWithDetails().map((item, idx) => (
+                                {getFinalItemizedList().length > 0 ? (
+                                  getFinalItemizedList().map((item, idx) => (
                                     <div key={`instore-bill-item-${item.id}-${idx}`} className="py-2 flex items-center justify-between text-xs">
                                       <div className="flex-1 pr-2">
                                         <div className="font-semibold text-slate-800 dark:text-white flex items-center gap-1.5">
@@ -3447,10 +3499,10 @@ export default function BookingModal({
                                       </div>
                                       <div className="text-right">
                                         <span className="font-mono text-slate-500 text-[11px]">
-                                          {item.quantity} × ₹{adjustPrice(item.price)}
+                                          {item.quantity} × ₹{item.price}
                                         </span>
                                         <div className="font-bold font-mono text-slate-800 dark:text-white">
-                                          ₹{item.quantity * adjustPrice(item.price)}
+                                          ₹{item.quantity * item.price}
                                         </div>
                                       </div>
                                     </div>
@@ -3473,18 +3525,10 @@ export default function BookingModal({
 
                             {/* Price Summary */}
                             <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-1.5 text-xs">
-                              <div className="flex justify-between text-slate-500">
-                                <span>Catalog Subtotal</span>
-                                <span className="font-mono">₹{getRawBaseTotal()}</span>
+                              <div className="flex justify-between text-slate-600 dark:text-slate-400 font-semibold">
+                                <span>Itemized Subtotal</span>
+                                <span className="font-mono font-bold">₹{getGrandTotal()}</span>
                               </div>
-                              {dynamicPricing && dynamicPricing.mode !== 'none' && dynamicPricing.percentage > 0 && (
-                                <div className={`flex justify-between ${dynamicPricing.mode === 'discount' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                  <span>{dynamicPricing.label || (dynamicPricing.mode === 'discount' ? 'Promo Discount' : 'Dynamic Adjustment')}</span>
-                                  <span className="font-mono">
-                                    {dynamicPricing.mode === 'discount' ? '-' : '+'}₹{Math.abs(getDynamicPricingAdjustment())}
-                                  </span>
-                                </div>
-                              )}
                               <div className="border-t border-slate-200 dark:border-slate-700 pt-2 flex justify-between items-center text-sm font-extrabold text-slate-900 dark:text-white">
                                 <span>Grand Total Payable</span>
                                 <span className="font-mono text-lg text-teal-600 dark:text-teal-400">₹{getGrandTotal()}</span>
@@ -4388,58 +4432,14 @@ export default function BookingModal({
                             </span>
                           </div>
                           
-                          {(() => {
-                            const rawSubtotal = getSelectedItemsWithDetails().reduce((sum, item) => sum + (item.price * item.quantity), 0);
-                            const expressSurcharge = selectedServices.includes('express') ? getExpressPriceVal() : 0;
-                            const rawBase = rawSubtotal + expressSurcharge;
-                            const isDeposit = rawBase === 0 && selectedServices.length > 0;
-                            const dynAdj = getDynamicPricingAdjustment();
-                            const discountAmt = getPaymentDiscount();
-                            const activeSub = getActiveMembership();
-
-                            return (
-                              <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-[11px] font-medium">
-                                {rawSubtotal > 0 && (
-                                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                                    <span>Services & Items Subtotal:</span>
-                                    <span className="font-mono">₹{rawSubtotal}</span>
-                                  </div>
-                                )}
-
-                                {expressSurcharge > 0 && (
-                                  <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                                    <span>Express Priority Option:</span>
-                                    <span className="font-mono">+₹{expressSurcharge}</span>
-                                  </div>
-                                )}
-
-                                {isDeposit && (
-                                  <div className="flex justify-between text-amber-600 dark:text-amber-400 font-semibold">
-                                    <span>Slot Reservation Deposit:</span>
-                                    <span className="font-mono">₹99</span>
-                                  </div>
-                                )}
-
-                                {dynAdj !== 0 && (
-                                  <div className={`flex justify-between ${dynAdj > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                                    <span>{dynamicPricing?.label || (dynAdj > 0 ? `Demand Surge (+${dynamicPricing?.percentage}%)` : `Special Discount (-${dynamicPricing?.percentage}%)`)}:</span>
-                                    <span className="font-mono">{dynAdj > 0 ? `+₹${dynAdj}` : `-₹${Math.abs(dynAdj)}`}</span>
-                                  </div>
-                                )}
-
-                                {discountAmt > 0 && (
-                                  <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
-                                    <span>
-                                      {activeSub 
-                                        ? `Prepaid ${activeSub.packageType} Discount (${activeSub.packageType === 'SMART' ? 10 : 20}% off):` 
-                                        : 'Membership Discount:'}
-                                    </span>
-                                    <span className="font-mono">-₹{discountAmt}</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
+                          <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-[11px] font-medium">
+                            <div className="flex justify-between text-slate-600 dark:text-slate-300 font-semibold">
+                              <span>Itemized Subtotal:</span>
+                              <span className="font-mono font-bold">
+                                {selectedServices.includes('hassle-free') ? '₹0' : `₹${getGrandTotal()}`}
+                              </span>
+                            </div>
+                          </div>
 
                           <div className="flex justify-between items-center pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 text-sm font-bold">
                             <span className="text-slate-900 dark:text-white">
@@ -4447,7 +4447,7 @@ export default function BookingModal({
                                 ? 'Amount Due Today:'
                                 : shouldSkipStep3() || (getSelectedItemsWithDetails().length === 0 && selectedServices.length > 0)
                                   ? 'Refundable Booking Deposit:' 
-                                  : 'Grand Total Projection:'}
+                                  : 'Grand Total:'}
                             </span>
                             <span className="text-lg font-mono text-brand-primary dark:text-brand-accent">
                               {selectedServices.includes('hassle-free') ? '₹0' : `₹${getGrandTotal()}`}
@@ -4597,8 +4597,14 @@ export default function BookingModal({
                         <div className="flex items-center gap-2.5">
                           <MessageSquare className="h-5 w-5 text-emerald-500 fill-emerald-500 animate-pulse" />
                           <div>
-                            <p className="text-xs font-bold text-slate-800 dark:text-white">Notify via WhatsApp</p>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400">Generate a pre-filled chat link to send order details to Tumblespin</p>
+                            <p className="text-xs font-bold text-slate-800 dark:text-white">
+                              {bookingType === 'instore' ? 'Send Invoice via WhatsApp' : 'Notify via WhatsApp'}
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                              {bookingType === 'instore' 
+                                ? `Pre-format invoice link to send directly to client's phone (${bookingDetails.phone || 'entered number'})` 
+                                : 'Generate a pre-filled chat link to send order details to Tumblespin'}
+                            </p>
                           </div>
                         </div>
                         <button

@@ -33,7 +33,12 @@ export function getBusinessInfo(): BusinessInfo {
         parsed.phone = '9606032491';
         localStorage.setItem('tumblespin_business_info', JSON.stringify(parsed));
       }
-      return { ...DEFAULT_INFO, ...parsed };
+      // Auto-correct legacy email to tumblespin26@gmail.com
+      if (!parsed.email || parsed.email.toLowerCase().includes('prakash')) {
+        parsed.email = 'tumblespin26@gmail.com';
+        localStorage.setItem('tumblespin_business_info', JSON.stringify(parsed));
+      }
+      return { ...DEFAULT_INFO, ...parsed, email: (!parsed.email || parsed.email.toLowerCase().includes('prakash')) ? 'tumblespin26@gmail.com' : parsed.email };
     }
   } catch (err) {}
   return DEFAULT_INFO;

@@ -4360,19 +4360,17 @@ export default function AdminPanel({
                       <div className="flex justify-center mb-1.5">
                         <img 
                           src={logoImg} 
-                          alt="Tumble Spin Logo" 
+                          alt="Store Logo" 
                           className="h-14 w-auto object-contain"
                           referrerPolicy="no-referrer"
                         />
                       </div>
                     )}
-                    <h2 className="text-base font-extrabold tracking-wider uppercase">TUMBLE SPIN</h2>
-                    <p className="text-[10px] uppercase font-bold text-slate-700">Luxe Laundry & Dry Care</p>
-                    <p className="text-[9px] text-slate-500 leading-tight">
-                      {businessInfo?.address || 'Tumble Spin, #6, 80 feet road, Kengeri Ring Rd, Mariyappana Palya, Bengaluru, Karnataka 560056, India'}
+                    <p className="text-[9px] text-slate-600 leading-tight font-medium">
+                      {(businessInfo?.address || '#6, 80 feet road, Kengeri Ring Rd, Mariyappana Palya, Bengaluru, Karnataka 560056, India').replace(/^Tumble Spin,\s*/i, '')}
                     </p>
-                    <p className="text-[9px] text-slate-700 font-bold">Manager Contact: {businessInfo?.phone || '+91 96060 32491'}</p>
-                    <p className="text-[9px] text-slate-500">Email: {businessInfo?.email || 'Prakashcsat@gmail.com'}</p>
+                    <p className="text-[9px] text-slate-700 font-bold">Contact: {businessInfo?.phone ? `+91 ${businessInfo.phone.replace(/^\+?91\s*/, '')}` : '+91 96060 32491'}</p>
+                    <p className="text-[9px] text-slate-500">Email: {businessInfo?.email && !businessInfo.email.toLowerCase().includes('prakash') ? businessInfo.email : 'tumblespin26@gmail.com'}</p>
                   </div>
 
                   <div className="border-t border-dashed border-slate-400 my-2"></div>
@@ -4436,50 +4434,39 @@ export default function AdminPanel({
                   {/* Totals */}
                   <div className="space-y-1.5 text-[10px] font-bold">
                     <div className="flex justify-between font-normal">
-                      <span>SUBTOTAL:</span>
-                      <span>₹{activeReceiptOrder.subServices?.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0) || activeReceiptOrder.totalPrice}</span>
+                      <span>ITEMIZED SUBTOTAL:</span>
+                      <span>₹{activeReceiptOrder.totalPrice}</span>
                     </div>
 
-                    {activeReceiptOrder.dynamicPricing && activeReceiptOrder.dynamicPricing.mode !== 'none' && activeReceiptOrder.dynamicPricing.percentage > 0 && (
-                      <div className="flex justify-between text-[9px] font-semibold">
-                        <span className="uppercase text-left">
-                          {activeReceiptOrder.dynamicPricing.label || (activeReceiptOrder.dynamicPricing.mode === 'surcharge' ? 'Surcharge' : 'Discount')} ({activeReceiptOrder.dynamicPricing.percentage}%):
-                        </span>
-                        <span>
-                          {activeReceiptOrder.dynamicPricing.mode === 'surcharge' ? '+' : '-'}₹{Math.round(((activeReceiptOrder.subServices?.reduce((sum: number, i: any) => sum + (i.price * i.quantity), 0) || activeReceiptOrder.totalPrice) * activeReceiptOrder.dynamicPricing.percentage) / 100)}
-                        </span>
-                      </div>
-                    )}
-
                     <div className="flex justify-between border-t border-double border-slate-950 pt-2 text-sm font-black">
-                      <span>TOTAL BILL:</span>
+                      <span>GRAND TOTAL:</span>
                       <span>₹{activeReceiptOrder.totalPrice}</span>
                     </div>
                   </div>
 
                   <div className="border-t border-dashed border-slate-400 my-2"></div>
 
-                  {/* Dynamic UPI QR Code */}
+                  {/* Static UPI QR Code */}
                   <div className="flex flex-col items-center justify-center p-2.5 border border-slate-300 rounded-lg bg-white space-y-1 my-2">
-                    <p className="text-[8px] font-bold text-slate-800 uppercase tracking-widest font-sans">Dynamic UPI QR Code</p>
+                    <p className="text-[8px] font-bold text-slate-800 uppercase tracking-widest font-sans">Static UPI Payment QR</p>
                     <img 
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                        `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(activeReceiptOrder.totalPrice).toFixed(2)}&cu=INR&tn=Order_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}&tr=Order_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}`
+                        `upi://pay?pa=${businessInfo?.upiId || 'prakashcsat@oksbi'}&pn=Tumble%20Spin&cu=INR&tn=Invoice_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}`
                       )}`}
                       onError={(e) => {
                         const target = e.currentTarget;
-                        const upiIntent = `upi://pay?pa=prakashcsat@oksbi&pn=Tumble%20Spin&am=${Number(activeReceiptOrder.totalPrice).toFixed(2)}&cu=INR&tn=Order_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}&tr=Order_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}`;
+                        const upiIntent = `upi://pay?pa=${businessInfo?.upiId || 'prakashcsat@oksbi'}&pn=Tumble%20Spin&cu=INR&tn=Invoice_${(activeReceiptOrder.orderId || '').replace(/\s+/g, '_')}`;
                         const alternateUrl = `https://quickchart.io/qr?size=150&text=${encodeURIComponent(upiIntent)}`;
                         if (target.src !== alternateUrl) {
                           target.src = alternateUrl;
                         }
                       }}
-                      alt="UPI QR Code"
+                      alt="Static UPI QR Code"
                       className="h-28 w-28 object-contain"
                       referrerPolicy="no-referrer"
                     />
-                    <p className="text-[7px] text-slate-500 font-bold uppercase font-mono tracking-wider">Scan with PhonePe / GPay / Paytm</p>
-                    <p className="text-[7px] text-slate-600 font-black uppercase font-mono mt-0.5">VPA: prakashcsat@oksbi</p>
+                    <p className="text-[7px] text-slate-500 font-bold uppercase font-mono tracking-wider">Scan with Any UPI App (GPay / PhonePe / Paytm)</p>
+                    <p className="text-[7px] text-slate-600 font-black uppercase font-mono mt-0.5">UPI ID: {businessInfo?.upiId || 'prakashcsat@oksbi'}</p>
                   </div>
 
                   <div className="border-t border-dashed border-slate-400 my-2"></div>
@@ -4493,14 +4480,49 @@ export default function AdminPanel({
               </div>
 
               {/* Action Buttons */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 flex gap-3">
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 flex flex-wrap sm:flex-nowrap gap-3">
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-slate-900 text-white dark:bg-brand-accent dark:text-brand-deep py-3 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 rounded-xl bg-slate-900 text-white dark:bg-brand-accent dark:text-brand-deep py-3 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
                 >
                   <Printer className="h-4 w-4" />
                   Print Receipt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanPhone = (activeReceiptOrder.phone || '').replace(/\D/g, '');
+                    let targetPhone = cleanPhone;
+                    if (cleanPhone.length === 10) {
+                      targetPhone = `91${cleanPhone}`;
+                    } else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+                      targetPhone = `91${cleanPhone.slice(1)}`;
+                    } else if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+                      targetPhone = cleanPhone;
+                    }
+                    const itemsSummary = (activeReceiptOrder.subServices || []).map((i: any) => `${i.name} (x${i.quantity})`).join(', ') || 'In-Store Treatment';
+                    const msg = `🧾 *TUMBLE SPIN - DIGITAL INVOICE & RECEIPT* 🧾\n\n` +
+                      `Hello *${activeReceiptOrder.fullName || 'Valued Customer'}*,\n` +
+                      `Thank you for choosing Tumble Spin! Here is your official order invoice and receipt:\n\n` +
+                      `📋 *Invoice / Order ID:* ${activeReceiptOrder.orderId}\n` +
+                      `📅 *Date:* ${new Date(activeReceiptOrder.createdAt || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}\n` +
+                      `✨ *Items:* ${itemsSummary}\n` +
+                      `🌿 *Care Type:* ${activeReceiptOrder.garmentCareOption || 'Standard Premium'}\n` +
+                      `💰 *Total Amount:* ₹${activeReceiptOrder.totalPrice}\n` +
+                      `💳 *Payment:* ${activeReceiptOrder.paymentMethod || 'UPI / Counter'}\n\n` +
+                      `📍 *Store Location:* #6, 80 feet road, Kengeri Ring Rd, Mariyappana Palya, Bengaluru - 560056\n` +
+                      `📞 *Helpline:* +91 ${businessInfo?.phone || '96060 32491'}\n\n` +
+                      `_Thank you for your visit! We will notify you as soon as your garments are ready._ ✨`;
+                    
+                    const finalRecipient = targetPhone || `91${(businessInfo?.phone || '9606032491').replace(/\D/g, '')}`;
+                    window.open(`https://wa.me/${finalRecipient}?text=${encodeURIComponent(msg)}`, '_blank');
+                  }}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 rounded-xl bg-[#25D366] text-white py-3 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
+                  id="admin-receipt-whatsapp-btn"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Send WhatsApp
                 </button>
                 <button
                   type="button"
